@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/intel-hpdd/go-daos/pkg/daos"
+	"github.com/rread/go-daos/pkg/daos"
 
 	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
