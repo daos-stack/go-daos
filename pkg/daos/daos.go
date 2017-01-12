@@ -1,8 +1,7 @@
 package daos
 
 //
-// #cgo LDFLAGS: -L/home/vagrant/daos/install/lib -ldaos  -lcrt_util -lcrt -ldaos_common -ldaos_tier -luuid -lpmem
-// #cgo CPPFLAGS: -I/home/vagrant/daos/install/include -I/home/vagrant/daos/src/include
+// #cgo LDFLAGS:  -ldaos  -lcrt_util -lcrt -ldaos_common -ldaos_tier -luuid -lpmem
 // #include <stdlib.h>
 // #include <daos.h>
 // #include <daos/common.h>
