@@ -12,8 +12,7 @@ Only basic Pool commands have been implemented so far.
 
 This is a [Go](https://golang.orghttps://golang.org/doc/install)
 project, so a Go development tools are naturally required. We
-recommend the most current Go release availble (curently 1.7.4), but
-1.6.x (which are avaialble from EPEL for EL 7) should work.
+recommend the most current Go release availble, curently 1.7.4.
 
 Setup environment and build. This assumes $daospath is set as it 
 was in the DAOS [README](https://github.com/daos-stack/daos/blob/master/README.md)
