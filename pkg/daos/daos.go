@@ -18,6 +18,29 @@ import (
 	"github.com/pkg/errors"
 )
 
+type (
+	// Rank is a target index
+	Rank C.daos_rank_t
+
+	// PoolHandle is an open conection to a Pool
+	PoolHandle C.daos_handle_t
+
+	// PoolInfo is current state of a pool
+	PoolInfo C.daos_pool_info_t
+
+	// ContHandle refers to an open container.
+	ContHandle C.daos_handle_t
+
+	// ContInfo is current status of a container.
+	ContInfo C.daos_cont_info_t
+
+	// Epoch identifiers (uint64)
+	Epoch C.daos_epoch_t
+
+	// EpochState is current epoch status.
+	EpochState C.daos_epoch_state_t
+)
+
 // Init initializes the DAOS connection
 func Init() error {
 	rc, err := C.daos_init()
@@ -62,14 +85,6 @@ func str2uuid(s string) (*C.uchar, error) {
 	return (*C.uchar)(unsafe.Pointer(&uuid[0])), nil
 }
 
-/*
-int
-daos_pool_create(unsigned int mode, unsigned int uid, unsigned int gid,
-		 const char *grp, const daos_rank_list_t *tgts, const char *dev,
-		 daos_size_t size, daos_rank_list_t *svc, uuid_t uuid,
-		 daos_event_t *ev)
-*/
-
 // PoolCreate creates a new pool of specfied size.
 func PoolCreate(mode uint32, uid uint32, gid uint32, group string, size int64) (string, error) {
 	var cGroup *C.char
@@ -110,12 +125,6 @@ func PoolCreate(mode uint32, uid uint32, gid uint32, group string, size int64) (
 	return uuid2str(uuid[:]), nil
 }
 
-/*
-int
-daos_pool_destroy(const uuid_t uuid, const char *grp, int force,
-		  daos_event_t *ev)
-*/
-
 // PoolDestroy deletes the passed pool uuid.
 func PoolDestroy(pool string, group string, force int) error {
 	var cGroup *C.char
@@ -130,17 +139,6 @@ func PoolDestroy(pool string, group string, force int) error {
 	rc, err := C.daos_pool_destroy(uuid, cGroup, C.int(force), nil)
 	return rc2err("daos_pool_destroy", rc, err)
 }
-
-/*
-int
-daos_pool_connect(const uuid_t uuid, const char *grp,
-		  const daos_rank_list_t *svc, unsigned int flags,
-		  daos_handle_t *poh, daos_pool_info_t *info, daos_event_t *ev);
-*/
-
-type PoolHandle C.daos_handle_t
-type PoolInfo C.daos_pool_info_t
-
 func (info *PoolInfo) UUID() string {
 	if info == nil {
 		return ""
@@ -197,7 +195,7 @@ func PoolConnect(pool string, group string, flags uint) (*PoolHandle, error) {
 		return nil, errors.Wrapf(err, "unable to parse %s", pool)
 	}
 	var poh PoolHandle
-	rc, err := C.daos_pool_connect(uuid, cGroup, nil, C.uint(flags), (*C.daos_handle_t)(&poh),
+	rc, err := C.daos_pool_connect(uuid, cGroup, nil, C.uint(flags), poh.Pointer(),
 		nil, nil)
 	if err = rc2err("daos_pool_connect", rc, err); err != nil {
 		return nil, err
@@ -205,29 +203,273 @@ func PoolConnect(pool string, group string, flags uint) (*PoolHandle, error) {
 	return &poh, nil
 }
 
-/*
-int
-daos_pool_disconnect(daos_handle_t poh, daos_event_t *ev);
-*/
+// H returns C-typed handle
+func (poh *PoolHandle) H() C.daos_handle_t {
+	return (C.daos_handle_t)(*poh)
+}
 
-// PoolDisconnect closes the pool handle.
+// Pointer returns C-typed handle pointer
+func (poh *PoolHandle) Pointer() *C.daos_handle_t {
+	return (*C.daos_handle_t)(poh)
+}
+
+// Disconnect closes the pool handle.
 func (poh *PoolHandle) Disconnect() error {
-	rc, err := C.daos_pool_disconnect((C.daos_handle_t)(*poh), nil)
+	rc, err := C.daos_pool_disconnect(poh.H(), nil)
 	return rc2err("daos_pool_disconnect", rc, err)
 }
 
-/*
-int
-daos_pool_query(daos_handle_t poh, daos_rank_list_t *tgts,
-		daos_pool_info_t *info, daos_event_t *ev);
-*/
 // Info returns current pool info
 func (poh *PoolHandle) Info() (*PoolInfo, error) {
 	var info PoolInfo
-	rc, err := C.daos_pool_query((C.daos_handle_t)(*poh), nil, (*C.daos_pool_info_t)(&info), nil)
+	rc, err := C.daos_pool_query(poh.H(), nil, (*C.daos_pool_info_t)(&info), nil)
 
 	if err = rc2err("daos_pool_query", rc, err); err != nil {
 		return nil, err
 	}
 	return &info, nil
+}
+
+// Exclude ranks from pool.
+//
+// https://github.com/golang/go/wiki/cgo
+// Convert C array into Go slice
+//     slice := (*[1 << 30]C.YourType)(unsafe.Pointer(theCArray))[:length:length]
+//
+func (poh *PoolHandle) Exclude(targets []Rank) error {
+	var tgts C.daos_rank_list_t
+
+	tgts.rl_nr.num = C.uint32_t(len(targets))
+	tgts.rl_ranks = C._alloc_ranks(tgts.rl_nr.num)
+	defer C.free(unsafe.Pointer(tgts.rl_ranks))
+
+	ranks := (*[1 << 30]C.daos_rank_t)(unsafe.Pointer(tgts.rl_ranks))[:len(targets):len(targets)]
+	for i, r := range targets {
+		ranks[i] = C.daos_rank_t(r)
+	}
+	rc, err := C.daos_pool_exclude(poh.H(), &tgts, nil)
+	return rc2err("daos_pool_exclude", rc, err)
+}
+
+// NewContainer creates a container identified by the UUID
+func (poh *PoolHandle) NewContainer(uuid string) error {
+	cuuid, err := str2uuid(uuid)
+	if err != nil {
+		return errors.Wrapf(err, "unable to parse %s", uuid)
+	}
+
+	rc, err := C.daos_cont_create(poh.H(), cuuid, nil)
+	return rc2err("daos_cont_create", rc, err)
+}
+
+// Open a the container identified by the UUID
+func (poh *PoolHandle) Open(uuid string, flags int) (*ContHandle, error) {
+	cuuid, err := str2uuid(uuid)
+	if err != nil {
+		return nil, errors.Wrapf(err, "unable to parse %s", uuid)
+	}
+
+	var coh ContHandle
+	rc, err := C.daos_cont_open(poh.H(), cuuid, C.uint(flags), (*C.daos_handle_t)(&coh), nil, nil)
+	if err := rc2err("daos_cont_open", rc, err); err != nil {
+		return nil, err
+	}
+	return &coh, nil
+}
+
+// Destroy the container identified by the UUID
+func (coh *ContHandle) Destroy(uuid string, force bool) error {
+	cuuid, err := str2uuid(uuid)
+	if err != nil {
+		return errors.Wrapf(err, "unable to parse %s", uuid)
+	}
+
+	var cforce C.int
+	if force {
+		cforce = 1
+	}
+
+	rc, err := C.daos_cont_destroy(coh.H(), cuuid, cforce, nil)
+	if err := rc2err("daos_cont_destroy", rc, err); err != nil {
+		return err
+	}
+	return nil
+}
+
+// H returns C-typed handle
+func (coh *ContHandle) H() C.daos_handle_t {
+	return C.daos_handle_t(*coh)
+}
+
+// Native returns native C-type epoch
+func (e Epoch) Native() C.daos_epoch_t {
+	return C.daos_epoch_t(e)
+}
+
+// Pointer turns C-typed EpochState pointer
+func (s *EpochState) Pointer() *C.daos_epoch_state_t {
+	return (*C.daos_epoch_state_t)(s)
+}
+
+// Close the container handle
+func (coh *ContHandle) CLose() error {
+	rc, err := C.daos_cont_close(coh.H(), nil)
+	return rc2err("daos_cont_close", rc, err)
+}
+
+// Info returns current pool info
+func (coh *ContHandle) Info() (*ContInfo, error) {
+	var info ContInfo
+	rc, err := C.daos_cont_query(coh.H(), (*C.daos_cont_info_t)(&info), nil)
+
+	if err = rc2err("daos_cont_query", rc, err); err != nil {
+		return nil, err
+	}
+	return &info, nil
+}
+
+// Attributes returns slide of attribute names
+func (coh *ContHandle) Attributes() ([]string, error) {
+	var size C.size_t
+	rc, err := C.daos_cont_attr_list(coh.H(), nil, &size, nil)
+	if err = rc2err("daos_cont_attr_list", rc, err); err != nil {
+		return nil, err
+	}
+
+	if size == 0 {
+		return nil, nil
+	}
+
+	buf := make([]byte, size)
+	rc, err = C.daos_cont_attr_list(coh.H(), (*C.char)(unsafe.Pointer(&buf[0])), &size, nil)
+	if err = rc2err("daos_cont_attr_list", rc, err); err != nil {
+		return nil, err
+	}
+
+	var attrs []string
+	var s int
+	for i, b := range buf {
+		if b == 0 {
+			attrs = append(attrs, string(buf[s:i]))
+			s = i + 1
+		}
+	}
+	return attrs, nil
+}
+
+// AttributeGet returns values for given set of attributes.
+func (coh *ContHandle) AttributeGet(names []string) ([]byte, error) {
+	return nil, errors.New("Not Implemented")
+}
+
+// AttributeSet set named attributes to the provided values.
+func (coh *ContHandle) AttributeSet(names []string, values []byte) error {
+	return errors.New("Not Implemented")
+}
+
+// HCE returns Highest Committed Epoch
+func (s *EpochState) HCE() Epoch {
+	return Epoch(s.es_hce)
+}
+
+// LRE returns Lowest Referenced Epoch
+func (s *EpochState) LRE() Epoch {
+	return Epoch(s.es_lre)
+}
+
+// LHE returns Lowest Held Epoch
+func (s *EpochState) LHE() Epoch {
+	return Epoch(s.es_lhe)
+}
+
+// GHCE Global Highest Committted Epoch
+func (s *EpochState) GHCE() Epoch {
+	return Epoch(s.es_ghce)
+}
+
+// GLRE Global Lowest Referenced Epoch
+func (s *EpochState) GLRE() Epoch {
+	return Epoch(s.es_glre)
+}
+
+// GHPCE Global Highest Partially Committted Epoch
+func (s *EpochState) GHPCE() Epoch {
+	return Epoch(s.es_ghpce)
+}
+
+// EpochFlush completes the epoch and returns the epoch state.
+func (coh *ContHandle) EpochFlush(e Epoch) (*EpochState, error) {
+	var s EpochState
+	rc, err := C.daos_epoch_flush(coh.H(), e.Native(), s.Pointer(), nil)
+	if err = rc2err("daos_epoch_flush", rc, err); err != nil {
+		return nil, err
+	}
+	return &s, nil
+
+}
+
+// EpochDiscard discards the epoch and returns current epoch state.
+func (coh *ContHandle) EpochDiscard(e Epoch) (*EpochState, error) {
+	var s EpochState
+	rc, err := C.daos_epoch_discard(coh.H(), e.Native(), s.Pointer(), nil)
+	if err = rc2err("daos_epoch_discard", rc, err); err != nil {
+		return nil, err
+	}
+	return &s, nil
+
+}
+
+// EpochQuery returns current epoch state.
+func (coh *ContHandle) EpochQuery() (*EpochState, error) {
+	var s EpochState
+	rc, err := C.daos_epoch_query(coh.H(), s.Pointer(), nil)
+	if err = rc2err("daos_epoch_query", rc, err); err != nil {
+		return nil, err
+	}
+	return &s, nil
+
+}
+
+// EpochHold propose a new lowest held epoch on this container handle.
+func (coh *ContHandle) EpochHold(e Epoch) (*EpochState, error) {
+	var s EpochState
+	rc, err := C.daos_epoch_discard(coh.H(), e.Native(), s.Pointer(), nil)
+	if err = rc2err("daos_epoch_hold", rc, err); err != nil {
+		return nil, err
+	}
+	return &s, nil
+
+}
+
+// EpochSlip increases the lowest referenced epoch of the container handle.
+func (coh *ContHandle) EpochSlip(e Epoch) (*EpochState, error) {
+	var s EpochState
+	rc, err := C.daos_epoch_discard(coh.H(), e.Native(), s.Pointer(), nil)
+	if err = rc2err("daos_epoch_slip", rc, err); err != nil {
+		return nil, err
+	}
+	return &s, nil
+
+}
+
+// EpochCommit commits an epoch for the container handle.
+func (coh *ContHandle) EpochCommit(e Epoch) (*EpochState, error) {
+	var s EpochState
+	rc, err := C.daos_epoch_discard(coh.H(), e.Native(), s.Pointer(), nil)
+	if err = rc2err("daos_epoch_commit", rc, err); err != nil {
+		return nil, err
+	}
+	return &s, nil
+
+}
+
+// EpochWait waits an epoch to be committed.
+func (coh *ContHandle) EpochWait(e Epoch) (*EpochState, error) {
+	var s EpochState
+	rc, err := C.daos_epoch_discard(coh.H(), e.Native(), s.Pointer(), nil)
+	if err = rc2err("daos_epoch_wait", rc, err); err != nil {
+		return nil, err
+	}
+	return &s, nil
+
 }
