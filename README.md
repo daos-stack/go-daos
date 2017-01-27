@@ -20,6 +20,7 @@ was in the DAOS [README](https://github.com/daos-stack/daos/blob/master/README.m
 
 	export GOPATH=$HOME/go  
 	export LD_LIBRARY_PATH=${daospath}/install/lib
+	export PATH=${daospath}/install/bin:$PATH
 	export CGO_CPPFLAGS="-I${daospath}/install/include -I${daospath}/src/include"
 	export CGO_LDFLAGS=-L${daospath}/install/lib 
 	go get -u github.com/rread/go-daos/cmd/dcmd
