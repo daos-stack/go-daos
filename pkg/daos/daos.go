@@ -318,6 +318,11 @@ func (e Epoch) Native() C.daos_epoch_t {
 	return C.daos_epoch_t(e)
 }
 
+// Native returns native C-type epoch
+func (e *Epoch) Pointer() *C.daos_epoch_t {
+	return (*C.daos_epoch_t)(e)
+}
+
 // Pointer turns C-typed EpochState pointer
 func (s *EpochState) Pointer() *C.daos_epoch_state_t {
 	return (*C.daos_epoch_state_t)(s)
@@ -434,12 +439,12 @@ func (s *EpochState) GHPCE() Epoch {
 
 // EpochFlush completes the epoch and returns the epoch state.
 func (coh *ContHandle) EpochFlush(e Epoch) (*EpochState, error) {
-	var s EpochState
-	rc, err := C.daos_epoch_flush(coh.H(), e.Native(), s.Pointer(), nil)
+	var es EpochState
+	rc, err := C.daos_epoch_flush(coh.H(), e.Native(), es.Pointer(), nil)
 	if err = rc2err("daos_epoch_flush", rc, err); err != nil {
 		return nil, err
 	}
-	return &s, nil
+	return &es, nil
 
 }
 
@@ -468,7 +473,7 @@ func (coh *ContHandle) EpochQuery() (*EpochState, error) {
 // EpochHold propose a new lowest held epoch on this container handle.
 func (coh *ContHandle) EpochHold(e Epoch) (*EpochState, error) {
 	var s EpochState
-	rc, err := C.daos_epoch_discard(coh.H(), e.Native(), s.Pointer(), nil)
+	rc, err := C.daos_epoch_hold(coh.H(), e.Pointer(), s.Pointer(), nil)
 	if err = rc2err("daos_epoch_hold", rc, err); err != nil {
 		return nil, err
 	}
@@ -479,7 +484,7 @@ func (coh *ContHandle) EpochHold(e Epoch) (*EpochState, error) {
 // EpochSlip increases the lowest referenced epoch of the container handle.
 func (coh *ContHandle) EpochSlip(e Epoch) (*EpochState, error) {
 	var s EpochState
-	rc, err := C.daos_epoch_discard(coh.H(), e.Native(), s.Pointer(), nil)
+	rc, err := C.daos_epoch_slip(coh.H(), e.Native(), s.Pointer(), nil)
 	if err = rc2err("daos_epoch_slip", rc, err); err != nil {
 		return nil, err
 	}
@@ -490,7 +495,7 @@ func (coh *ContHandle) EpochSlip(e Epoch) (*EpochState, error) {
 // EpochCommit commits an epoch for the container handle.
 func (coh *ContHandle) EpochCommit(e Epoch) (*EpochState, error) {
 	var s EpochState
-	rc, err := C.daos_epoch_discard(coh.H(), e.Native(), s.Pointer(), nil)
+	rc, err := C.daos_epoch_commit(coh.H(), e.Native(), s.Pointer(), nil)
 	if err = rc2err("daos_epoch_commit", rc, err); err != nil {
 		return nil, err
 	}
@@ -501,7 +506,7 @@ func (coh *ContHandle) EpochCommit(e Epoch) (*EpochState, error) {
 // EpochWait waits an epoch to be committed.
 func (coh *ContHandle) EpochWait(e Epoch) (*EpochState, error) {
 	var s EpochState
-	rc, err := C.daos_epoch_discard(coh.H(), e.Native(), s.Pointer(), nil)
+	rc, err := C.daos_epoch_wait(coh.H(), e.Native(), s.Pointer(), nil)
 	if err = rc2err("daos_epoch_wait", rc, err); err != nil {
 		return nil, err
 	}
