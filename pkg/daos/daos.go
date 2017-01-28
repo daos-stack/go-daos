@@ -13,7 +13,7 @@ package daos
 import "C"
 
 import (
-	"log"
+	"fmt"
 	"unsafe"
 
 	"github.com/pkg/errors"
@@ -323,6 +323,10 @@ func (e *Epoch) Pointer() *C.daos_epoch_t {
 	return (*C.daos_epoch_t)(e)
 }
 
+func (e Epoch) String() string {
+	return fmt.Sprintf("0x%x", uint64(e))
+}
+
 // Pointer turns C-typed EpochState pointer
 func (s *EpochState) Pointer() *C.daos_epoch_state_t {
 	return (*C.daos_epoch_state_t)(s)
@@ -407,6 +411,11 @@ func (coh *ContHandle) AttributeSet(names []string, values []byte) error {
 	return errors.New("Not Implemented")
 }
 
+func (s *EpochState) String() string {
+	return fmt.Sprintf("HCE %s, LRE %s, LHE %s, GHCE %s, GLRE %s, GHPCE %s",
+		s.HCE(), s.LRE(), s.LHE(), s.GHCE(), s.GLRE(), s.GHPCE())
+}
+
 // HCE returns Highest Committed Epoch
 func (s *EpochState) HCE() Epoch {
 	return Epoch(s.es_hce)
@@ -471,13 +480,13 @@ func (coh *ContHandle) EpochQuery() (*EpochState, error) {
 }
 
 // EpochHold propose a new lowest held epoch on this container handle.
-func (coh *ContHandle) EpochHold(e Epoch) (*EpochState, error) {
+func (coh *ContHandle) EpochHold(e Epoch) (Epoch, error) {
 	var s EpochState
 	rc, err := C.daos_epoch_hold(coh.H(), e.Pointer(), s.Pointer(), nil)
 	if err = rc2err("daos_epoch_hold", rc, err); err != nil {
-		return nil, err
+		return 0, err
 	}
-	return &s, nil
+	return e, nil
 
 }
 
@@ -615,22 +624,22 @@ type (
 
 	// ObjectHandle refers to an open object
 	ObjectHandle C.daos_handle_t
-	DistKey      Key
-	AttrKey      Key
+	DistKey      IoVec
+	AttrKey      IoVec
 	IODescriptor C.daos_vec_iod_t
 	SGList       C.daos_sg_list_t
-	Key          C.daos_key_t
+	IoVec        C.daos_iov_t
 )
 
-func NewKey(s string) *Key {
-	var key Key
-	key.iov_buf = unsafe.Pointer(C.CString(s))
-	key.iov_buf_len = C.daos_size_t(len(s) + 1)
-	key.iov_len = key.iov_buf_len
-	return &key
+func StringToIov(s string) *IoVec {
+	var iov IoVec
+	iov.iov_buf = unsafe.Pointer(C.CString(s))
+	iov.iov_buf_len = C.daos_size_t(len(s) + 1)
+	iov.iov_len = iov.iov_buf_len
+	return &iov
 }
 
-func (k *Key) Free() {
+func (k *IoVec) Free() {
 	if k != nil && k.iov_buf != nil {
 		C.free(k.iov_buf)
 		k.iov_buf = nil
@@ -638,7 +647,7 @@ func (k *Key) Free() {
 }
 
 func (dk *DistKey) Free() {
-	(*Key)(dk).Free()
+	(*IoVec)(dk).Free()
 }
 
 func (dk *DistKey) Pointer() *C.daos_dkey_t {
@@ -646,15 +655,15 @@ func (dk *DistKey) Pointer() *C.daos_dkey_t {
 }
 
 func (ak *AttrKey) Free() {
-	(*Key)(ak).Free()
+	(*IoVec)(ak).Free()
 }
 
 func (ak *AttrKey) Pointer() *C.daos_akey_t {
-	return (*C.daos_dkey_t)(ak)
+	return (*C.daos_akey_t)(ak)
 }
 
 func (ak *AttrKey) Native() C.daos_akey_t {
-	return C.daos_dkey_t(*ak)
+	return C.daos_akey_t(*ak)
 }
 
 func IOD(ak *AttrKey, n int) *IODescriptor {
@@ -710,8 +719,8 @@ func SGAlloc(sz int) *SGList {
 func (sg *SGList) Free() {
 	if sg != nil {
 		if sg.sg_iovs != nil {
-			C.free(unsafe.Pointer(sg.sg_iovs))
 			C.free(unsafe.Pointer(sg.sg_iovs.iov_buf))
+			C.free(unsafe.Pointer(sg.sg_iovs))
 			sg.sg_iovs = nil
 		}
 	}
@@ -722,38 +731,40 @@ func (sg *SGList) Pointer() *C.daos_sg_list_t {
 }
 
 func (oh *ObjectHandle) Put(e Epoch, dkey string, akey string, value []byte) error {
-	distkey := (*DistKey)(NewKey(dkey))
+	distkey := (*DistKey)(StringToIov(dkey))
 	defer distkey.Free()
 
-	attrkey := (*AttrKey)(NewKey(akey))
+	attrkey := (*AttrKey)(StringToIov(akey))
 	defer attrkey.Free()
 
-	iov := IOD(attrkey, len(value))
-	defer iov.Free()
+	iod := IOD(attrkey, len(value))
+	defer iod.Free()
 
 	sg := SG(value)
 	defer sg.Free()
 
-	log.Printf("iov: %#v\nsg: %#v", iov.Pointer(), sg.Pointer())
+	//log.Printf("iov: %#v\nsg: %#v", iod.Pointer(), sg.Pointer())
 	rc, err := C.daos_obj_update(oh.H(), e.Native(), distkey.Pointer(), 1,
-		iov.Pointer(), sg.Pointer(), nil)
+		iod.Pointer(), sg.Pointer(), nil)
 	return rc2err("Put: daos_object_update", rc, err)
 }
 
 func (oh *ObjectHandle) Get(e Epoch, dkey string, akey string, n int) ([]byte, error) {
-	distkey := (*DistKey)(NewKey(dkey))
+	distkey := (*DistKey)(StringToIov(dkey))
 	defer distkey.Free()
 
-	attrkey := (*AttrKey)(NewKey(akey))
+	attrkey := (*AttrKey)(StringToIov(akey))
 	defer attrkey.Free()
 
-	iov := IOD(attrkey, n)
-	defer iov.Free()
+	iod := IOD(attrkey, n)
+	defer iod.Free()
 
 	sg := SGAlloc(n)
 	defer sg.Free()
+
+	//log.Printf("iov: %#v\nsg: %#v", iod.Pointer(), sg.Pointer())
 	rc, err := C.daos_obj_fetch(oh.H(), e.Native(), distkey.Pointer(), 1,
-		iov.Pointer(), sg.Pointer(), nil, nil)
+		iod.Pointer(), sg.Pointer(), nil, nil)
 
 	err = rc2err("Get: daos_object_fetch", rc, err)
 	if err != nil {

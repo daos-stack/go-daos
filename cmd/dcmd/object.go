@@ -44,6 +44,7 @@ func init() {
 }
 
 func objHelloCommand(c *cli.Context) error {
+
 	err := daos.Init()
 	if err != nil {
 		return errors.Wrap(err, "daos_init failed")
@@ -63,31 +64,30 @@ func objHelloCommand(c *cli.Context) error {
 	}
 	defer coh.Close()
 
-	log.Printf("epoch query")
 	s, err := coh.EpochQuery()
 	if err != nil {
 		return errors.Wrap(err, "epoch query failed")
 	}
+	log.Printf("epoch state [%s]", s)
 
-	e := s.HCE() + 1
-	/*
-		log.Printf("epoch hold: %v", e)
-		_, err = coh.EpochHold(e)
-		if err != nil {
-			return errors.Wrap(err, "epoch hold failed")
-		}
-	*/
-	defer coh.EpochCommit(e)
+	e, err := coh.EpochHold(0)
+	if err != nil {
+		return errors.Wrap(err, "epoch hold failed")
+	}
+	cb := coh.EpochDiscard
+	defer func() {
+		cb(e)
+	}()
+
+	log.Printf("held epoch %s", e)
 
 	oid := daos.ObjectIDInit(0, 0, 1, daos.ClassTinyRW)
 
-	log.Printf("declare")
 	err = coh.ObjectDeclare(oid, e, nil)
 	if err != nil {
 		return errors.Wrap(err, "obj declare failed")
 	}
 
-	log.Printf("obj open")
 	oh, err := coh.ObjectOpen(oid, e, daos.ObjOpenRW)
 	if err != nil {
 		return errors.Wrap(err, "open object failed")
@@ -96,17 +96,18 @@ func objHelloCommand(c *cli.Context) error {
 
 	val := c.String("value")
 
-	log.Printf("put: %v", val)
+	log.Printf("put: '%s'", val)
 	err = oh.Put(e, "attrs", "hello", []byte(val))
 	if err != nil {
 		return errors.Wrap(err, "put failed failed")
 	}
 
-	log.Printf("get")
+	cb = coh.EpochCommit
+
 	buf, err := oh.Get(e, "attrs", "hello", len(val))
 	if err != nil {
 		return errors.Wrap(err, "put failed failed")
 	}
-	log.Printf("fetched buf %v", string(buf))
+	log.Printf("fetched buf '%s'", string(buf))
 	return nil
 }

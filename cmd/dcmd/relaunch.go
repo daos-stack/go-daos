@@ -31,7 +31,7 @@ func relaunch() {
 	}
 	args = append(args, os.Args...)
 	// fmt.Println("launch", args)
-	err = syscall.Exec("/home/vagrant/daos//install/bin/orterun", args, os.Environ())
+	err = syscall.Exec(prog, args, os.Environ())
 	if err != nil {
 		panic(err)
 	}
