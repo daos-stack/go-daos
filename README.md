@@ -36,47 +36,17 @@ and install in the Go workspace. The `dcmd` binary will be in
 
 Also includes a simple CLI tool for interacting with DAOS. This tool
 requires the orterun command that was built for DAOS to be on the
-command line, though it will take care of running it for you so you
-can use command lines like this (if default values work for you):
+command line, and will handle running itself with orterun if is run
+directly. When dcmd calls orterun itself, the default uri file is
+/tmp/daos-uri or it can be customized with --uri option. See command
+help for more options and command details.
 
-### Command help
+This will create a single object and attempt to write and then read a
+value:
 
-	 NAME:
-	    dcmd - DAOS-related actions
+	cont=$(uuidgen)
+	pool=$(dcmd pool create)
+	dcmd cont create --pool $pool --uuid $cont
+	dcmd object hello --pool $pool --cont $cont --value "world"
 
-	 USAGE:
-	    dcmd [global options] commadn [command options] [arguments...]
-
-	    This command must be run using the customized orterun from DAOS project.
-
-	 VERSION:
-	    0.1
-
-	 AUTHOR:
-	    Intel® HPDD <HPDD-enterprise-lustre@intel.com>
-
-	 COMMANDS:
-	      create   Create a pool
-	      info     Display info about pool
-	      destroy  Destroy pools
-	      help, h  Shows a list of commands or help for one command
-
-	 GLOBAL OPTIONS:
-	    --np value      Number of processes to start (default: 1)
-	    --uri value     path to URI file (default: "/tmp/daos-uri")
-	    --runner value  path to mpi runner to use (default: "orterun")
-	    --help, -h      show help
-	    --version, -v   print the version
-
-
-### Example
-
-	[vagrant@localhost go-daos]$ dcmd create 
-	aec497ca-8cf5-4d65-ab41-998ad03f5cb8
-	[vagrant@localhost go-daos]$ dcmd info aec497ca-8cf5-4d65-ab41-998ad03f5cb8
-	Pool:     aec497ca-8cf5-4d65-ab41-998ad03f5cb8
-	Mode:     0644
-	Targets:  1
-	Disabled: 0
-	[vagrant@localhost go-daos]$ dcmd destroy aec497ca-8cf5-4d65-ab41-998ad03f5cb8
 
