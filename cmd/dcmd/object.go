@@ -104,10 +104,10 @@ func objHelloCommand(c *cli.Context) error {
 
 	cb = coh.EpochCommit
 
-	buf, err := oh.Get(e, "attrs", "hello", len(val))
+	buf, err := oh.Get(e, "attrs", "hello")
 	if err != nil {
 		return errors.Wrap(err, "put failed failed")
 	}
-	log.Printf("fetched buf '%s'", string(buf))
+	log.Printf("fetched buf '%s'", buf)
 	return nil
 }

@@ -14,6 +14,7 @@ import "C"
 
 import (
 	"fmt"
+	"log"
 	"unsafe"
 
 	"github.com/pkg/errors"
@@ -631,6 +632,7 @@ type (
 	IoVec        C.daos_iov_t
 )
 
+// StringToIov creates a C buffer with copy of string and returns a go IoVec.
 func StringToIov(s string) *IoVec {
 	var iov IoVec
 	iov.iov_buf = unsafe.Pointer(C.CString(s))
@@ -639,11 +641,26 @@ func StringToIov(s string) *IoVec {
 	return &iov
 }
 
+// ByteToIov creates a C iovec with C buffer initialized with value
+func ByteToIov(value []byte) *IoVec {
+	iov := (*C.daos_iov_t)(C.malloc(C.size_t(unsafe.Sizeof(C.daos_iov_t{}))))
+	n := C.size_t(len(value))
+	iov.iov_len = C.daos_size_t(n)
+	iov.iov_buf_len = C.daos_size_t(n)
+	iov.iov_buf = C.CBytes(value)
+	return (*IoVec)(iov)
+}
+
 func (k *IoVec) Free() {
 	if k != nil && k.iov_buf != nil {
 		C.free(k.iov_buf)
 		k.iov_buf = nil
 	}
+}
+
+func (iov *IoVec) Pointer() *C.daos_iov_t {
+	return (*C.daos_iov_t)(iov)
+
 }
 
 func (dk *DistKey) Free() {
@@ -666,12 +683,13 @@ func (ak *AttrKey) Native() C.daos_akey_t {
 	return C.daos_akey_t(*ak)
 }
 
-func IOD(ak *AttrKey, n int) *IODescriptor {
+func IOD(ak *AttrKey, recSize int) *IODescriptor {
 	var iod IODescriptor
 	iod.vd_name = ak.Native()
 	iod.vd_nr = 1
 	rec := (*C.daos_recx_t)(C.malloc(C.size_t(unsafe.Sizeof(C.daos_recx_t{}))))
-	rec.rx_rsize = C.uint64_t(n)
+	rec.rx_rsize = C.uint64_t(recSize)
+	rec.rx_idx = 0
 	rec.rx_nr = 1
 	iod.vd_recxs = rec
 	return &iod
@@ -692,19 +710,13 @@ func (iod *IODescriptor) Pointer() *C.daos_vec_iod_t {
 
 func SG(value []byte) *SGList {
 	var sg SGList
-	iov := (*C.daos_iov_t)(C.malloc(C.size_t(unsafe.Sizeof(C.daos_iov_t{}))))
-	n := C.size_t(len(value))
-	iov.iov_len = C.daos_size_t(n)
-	iov.iov_buf_len = C.daos_size_t(n)
-	iov.iov_buf = C.malloc(n)
-	C.memcpy(iov.iov_buf, unsafe.Pointer(&value[0]), n)
-
+	iov := ByteToIov(value)
 	sg.sg_nr.num = 1
-	sg.sg_iovs = iov
+	sg.sg_iovs = iov.Pointer()
 	return &sg
 }
 
-func SGAlloc(sz int) *SGList {
+func SGAlloc(sz C.uint64_t) *SGList {
 	var sg SGList
 	iov := (*C.daos_iov_t)(C.malloc(C.size_t(unsafe.Sizeof(C.daos_iov_t{}))))
 	iov.iov_len = C.daos_size_t(sz)
@@ -730,6 +742,7 @@ func (sg *SGList) Pointer() *C.daos_sg_list_t {
 	return (*C.daos_sg_list_t)(sg)
 }
 
+// Put sets the first record of a-key to value, with record size is len(value).
 func (oh *ObjectHandle) Put(e Epoch, dkey string, akey string, value []byte) error {
 	distkey := (*DistKey)(StringToIov(dkey))
 	defer distkey.Free()
@@ -749,28 +762,51 @@ func (oh *ObjectHandle) Put(e Epoch, dkey string, akey string, value []byte) err
 	return rc2err("Put: daos_object_update", rc, err)
 }
 
-func (oh *ObjectHandle) Get(e Epoch, dkey string, akey string, n int) ([]byte, error) {
+const (
+	RecAny = C.DAOS_REC_ANY
+)
+
+// Get returns first record for a-key.
+func (oh *ObjectHandle) Get(e Epoch, dkey string, akey string) ([]byte, error) {
 	distkey := (*DistKey)(StringToIov(dkey))
 	defer distkey.Free()
 
 	attrkey := (*AttrKey)(StringToIov(akey))
 	defer attrkey.Free()
 
-	iod := IOD(attrkey, n)
+	iod := IOD(attrkey, RecAny)
 	defer iod.Free()
 
-	sg := SGAlloc(n)
+	// Fetch record size
+	rc, err := C.daos_obj_fetch(oh.H(), e.Native(), distkey.Pointer(), 1,
+		iod.Pointer(), nil, nil, nil)
+	if err = rc2err("Get: daos_object_fetch", rc, err); err != nil {
+		return nil, err
+	}
+
+	recSize := iod.vd_recxs.rx_rsize
+	if recSize == 0 {
+		return nil, errors.New("zero recsize")
+	}
+	log.Printf("found record size: %d", recSize)
+
+	sg := SGAlloc(recSize)
 	defer sg.Free()
 
 	//log.Printf("iov: %#v\nsg: %#v", iod.Pointer(), sg.Pointer())
-	rc, err := C.daos_obj_fetch(oh.H(), e.Native(), distkey.Pointer(), 1,
+	rc, err = C.daos_obj_fetch(oh.H(), e.Native(), distkey.Pointer(), 1,
 		iod.Pointer(), sg.Pointer(), nil, nil)
-
 	err = rc2err("Get: daos_object_fetch", rc, err)
 	if err != nil {
 		return nil, err
 	}
-	buf := C.GoBytes(unsafe.Pointer(sg.sg_iovs.iov_buf), C.int(sg.sg_iovs.iov_buf_len))
+	var buf []byte
+	if sg.sg_nr.num_out == 1 {
+		buf = C.GoBytes(unsafe.Pointer(sg.sg_iovs.iov_buf), C.int(sg.sg_iovs.iov_buf_len))
+	} else {
+		log.Printf("num: %d num_out %d records", sg.sg_nr.num, sg.sg_nr.num_out)
+	}
+
 	return buf, nil
 
 }
