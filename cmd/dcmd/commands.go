@@ -1,6 +1,23 @@
 package main
 
-import cli "gopkg.in/urfave/cli.v1"
+import (
+	"github.com/rread/go-daos/pkg/daos"
+
+	"github.com/pkg/errors"
+	cli "gopkg.in/urfave/cli.v1"
+)
+
+func daosCommand(cmd func(*cli.Context) error) func(*cli.Context) error {
+	return func(c *cli.Context) error {
+		err := daos.Init()
+		if err != nil {
+			return errors.Wrap(err, "daos_init failed")
+		}
+		defer daos.Fini()
+
+		return cmd(c)
+	}
+}
 
 func init() {
 	poolCommands := cli.Command{
@@ -11,7 +28,7 @@ func init() {
 				Name:      "create",
 				Usage:     "Create a pool",
 				ArgsUsage: "",
-				Action:    poolCreateCommand,
+				Action:    daosCommand(poolCreate),
 				Flags: []cli.Flag{
 					cli.StringFlag{
 						Name:  "group, g",
@@ -41,7 +58,7 @@ func init() {
 				Name:      "info",
 				Usage:     "Display info about pool",
 				ArgsUsage: "[uuid [uuid...]]",
-				Action:    poolInfoCommand,
+				Action:    daosCommand(poolInfo),
 				Flags: []cli.Flag{
 					cli.StringFlag{
 						Name:  "group, g",
@@ -53,7 +70,7 @@ func init() {
 				Name:      "destroy",
 				Usage:     "Destroy pools",
 				ArgsUsage: "[uuid [uuid...]]",
-				Action:    poolDestroyCommand,
+				Action:    daosCommand(poolDestroy),
 				Flags: []cli.Flag{
 					cli.StringFlag{
 						Name:  "group, g",

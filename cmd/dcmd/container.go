@@ -17,7 +17,7 @@ func init() {
 				Name:      "create",
 				Usage:     "Create a container",
 				ArgsUsage: "[uuid [uuid...]]",
-				Action:    contCreateCommand,
+				Action:    daosCommand(contCreate),
 				Flags: []cli.Flag{
 					cli.StringFlag{
 						Name:  "pool",
@@ -37,7 +37,7 @@ func init() {
 				Name:      "info",
 				Usage:     "Display info about container",
 				ArgsUsage: "[uuid [uuid...]]",
-				Action:    contInfoCommand,
+				Action:    daosCommand(contInfo),
 				Flags: []cli.Flag{
 					cli.StringFlag{
 						Name:  "pool",
@@ -53,7 +53,7 @@ func init() {
 				Name:      "destroy",
 				Usage:     "Destroy containers",
 				ArgsUsage: "[uuid [uuid...]]",
-				Action:    contDestroyCommand,
+				Action:    daosCommand(contDestroy),
 				Flags: []cli.Flag{
 					cli.StringFlag{
 						Name:  "pool",
@@ -70,13 +70,7 @@ func init() {
 	commands = append(commands, poolCommands)
 }
 
-func contCreateCommand(c *cli.Context) error {
-	err := daos.Init()
-	if err != nil {
-		return errors.Wrap(err, "daos_init failed")
-	}
-	defer daos.Fini()
-
+func contCreate(c *cli.Context) error {
 	group := c.String("group")
 
 	poh, err := daos.PoolConnect(c.String("pool"), group, daos.PoolConnectRW)
@@ -89,13 +83,7 @@ func contCreateCommand(c *cli.Context) error {
 	return err
 }
 
-func contInfoCommand(c *cli.Context) error {
-	err := daos.Init()
-	if err != nil {
-		return errors.Wrap(err, "daos_init failed")
-	}
-	defer daos.Fini()
-
+func contInfo(c *cli.Context) error {
 	group := c.String("group")
 
 	poh, err := daos.PoolConnect(c.String("pool"), group, daos.PoolConnectRW)
@@ -125,6 +113,7 @@ func contInfoCommand(c *cli.Context) error {
 
 	return nil
 }
-func contDestroyCommand(c *cli.Context) error {
+
+func contDestroy(c *cli.Context) error {
 	return nil
 }

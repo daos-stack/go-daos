@@ -10,12 +10,7 @@ import (
 	cli "gopkg.in/urfave/cli.v1"
 )
 
-func poolCreateCommand(c *cli.Context) error {
-	err := daos.Init()
-	if err != nil {
-		return errors.Wrap(err, "daos_init failed")
-	}
-	defer daos.Fini()
+func poolCreate(c *cli.Context) error {
 
 	group := c.String("group")
 	uid, err := lookupUser(c.String("uid"))
@@ -43,13 +38,7 @@ func poolCreateCommand(c *cli.Context) error {
 	return nil
 }
 
-func poolInfoCommand(c *cli.Context) error {
-	err := daos.Init()
-	if err != nil {
-		return errors.Wrap(err, "daos_init failed")
-	}
-	defer daos.Fini()
-
+func poolInfo(c *cli.Context) error {
 	group := c.String("group")
 
 	for _, pool := range c.Args() {
@@ -77,13 +66,7 @@ func poolInfoCommand(c *cli.Context) error {
 	return nil
 }
 
-func poolDestroyCommand(c *cli.Context) error {
-	err := daos.Init()
-	if err != nil {
-		return errors.Wrap(err, "daos_init failed")
-	}
-	defer daos.Fini()
-
+func poolDestroy(c *cli.Context) error {
 	group := c.String("group")
 	var force int
 	if c.Bool("force") {

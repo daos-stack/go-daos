@@ -18,7 +18,7 @@ func init() {
 				Name:      "hello",
 				Usage:     "Create an object in  a container",
 				ArgsUsage: "[uuid [uuid...]]",
-				Action:    objHelloCommand,
+				Action:    daosCommand(objHello),
 				Flags: []cli.Flag{
 					cli.StringFlag{
 						Name:  "pool",
@@ -43,14 +43,7 @@ func init() {
 	commands = append(commands, objCommands)
 }
 
-func objHelloCommand(c *cli.Context) error {
-
-	err := daos.Init()
-	if err != nil {
-		return errors.Wrap(err, "daos_init failed")
-	}
-	defer daos.Fini()
-
+func objHello(c *cli.Context) error {
 	group := c.String("group")
 	log.Printf("open pool: %v", c.String("pool"))
 	poh, err := daos.PoolConnect(c.String("pool"), group, daos.PoolConnectRW)
@@ -74,6 +67,7 @@ func objHelloCommand(c *cli.Context) error {
 	if err != nil {
 		return errors.Wrap(err, "epoch hold failed")
 	}
+
 	cb := coh.EpochDiscard
 	defer func() {
 		cb(e)
@@ -99,7 +93,7 @@ func objHelloCommand(c *cli.Context) error {
 	log.Printf("put: '%s'", val)
 	err = oh.Put(e, "attrs", "hello", []byte(val))
 	if err != nil {
-		return errors.Wrap(err, "put failed failed")
+		return errors.Wrap(err, "put failed")
 	}
 
 	cb = coh.EpochCommit

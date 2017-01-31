@@ -61,9 +61,6 @@ func Fini() {
 // then it is wrapped, otherwise it is ignored.
 func rc2err(label string, rc C.int, err error) error {
 	if rc != 0 {
-		if err != nil {
-			return errors.Wrapf(err, "%s failed: %d", label, rc)
-		}
 		return errors.Errorf("%s: %d", label, rc)
 	}
 	return nil
@@ -793,7 +790,7 @@ func (oh *ObjectHandle) Get(e Epoch, dkey string, akey string) ([]byte, error) {
 	sg := SGAlloc(recSize)
 	defer sg.Free()
 
-	//log.Printf("iov: %#v\nsg: %#v", iod.Pointer(), sg.Pointer())
+	//log.Printf("iod: %#v\nvd_recxs: %#v\nsg: %#v\nsg_iovs:%#v", iod.Pointer(), iod.vd_recxs, sg.Pointer(), sg.sg_iovs)
 	rc, err = C.daos_obj_fetch(oh.H(), e.Native(), distkey.Pointer(), 1,
 		iod.Pointer(), sg.Pointer(), nil, nil)
 	err = rc2err("Get: daos_object_fetch", rc, err)
