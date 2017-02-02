@@ -93,7 +93,7 @@ func objHello(c *cli.Context) error {
 
 	log.Printf("held epoch %s", e)
 
-	oid := daos.ObjectIDInit(0, 0, 1, daos.ClassLargeRW)
+	oid := daos.ObjectIDInit(0, 0, 2, daos.ClassLargeRW)
 
 	err = coh.ObjectDeclare(oid, e, nil)
 	if err != nil {
@@ -194,7 +194,7 @@ func objAkeys(c *cli.Context) error {
 	}
 	defer coh.Close()
 
-	oid := daos.ObjectIDInit(0, 0, 1, daos.ClassLargeRW)
+	oid := daos.ObjectIDInit(0, 0, 2, daos.ClassLargeRW)
 
 	oh, err := coh.ObjectOpen(oid, daos.EpochMax, daos.ObjOpenRW)
 	if err != nil {
