@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/user"
 	"syscall"
 )
 
@@ -28,6 +29,13 @@ func relaunch() {
 	}
 	if *uri != "" {
 		args = append(args, "--ompi-server", "file:"+*uri)
+	}
+	user, err := user.Current()
+	if err != nil {
+		panic(err)
+	}
+	if user.Username == "root" {
+		args = append(args, "--allow-run-as-root")
 	}
 	args = append(args, os.Args...)
 	// fmt.Println("launch", args)
