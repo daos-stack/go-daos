@@ -525,6 +525,10 @@ type Hash C.daos_hash_out_t
 type OClassID C.daos_oclass_id_t
 type ObjectID C.daos_obj_id_t
 
+func (o *ObjectID) String() string {
+	return fmt.Sprintf("%d.%d.%d", o.hi, o.mid, o.lo)
+}
+
 func (o *ObjectID) Native() C.daos_obj_id_t {
 	return C.daos_obj_id_t(*o)
 }
@@ -537,14 +541,41 @@ func (c OClassID) Native() C.daos_oclass_id_t {
 	return C.daos_oclass_id_t(c)
 }
 
+func (c OClassID) String() string {
+	switch c {
+	case ClassTinyRW:
+		return "TinyRW"
+	case ClassSmallRW:
+		return "SmallRW"
+	case ClassLargeRW:
+		return "LargeRW"
+	case ClassRepl2RW:
+		return "Repl2RW"
+	case ClassReplMaxRW:
+		return "ReplMaxRW"
+	default:
+		return "Unknown"
+	}
+}
+
 const (
-	ClassUnknown   = OClassID(C.DAOS_OC_UNKNOWN)
-	ClassTinyRW    = OClassID(C.DAOS_OC_TINY_RW)
-	ClassSmallRW   = OClassID(C.DAOS_OC_SMALL_RW)
-	ClassLargeRW   = OClassID(C.DAOS_OC_LARGE_RW)
-	ClassRepl2RW   = OClassID(C.DAOS_OC_REPL_2_RW)
-	ClassReplMaxRW = OClassID(C.DAOS_OC_REPL_MAX_RW)
+	startOfObjectClasses = ClassUnknown
+	ClassUnknown         = OClassID(C.DAOS_OC_UNKNOWN)
+	ClassTinyRW          = OClassID(C.DAOS_OC_TINY_RW)
+	ClassSmallRW         = OClassID(C.DAOS_OC_SMALL_RW)
+	ClassLargeRW         = OClassID(C.DAOS_OC_LARGE_RW)
+	ClassRepl2RW         = OClassID(C.DAOS_OC_REPL_2_RW)
+	ClassReplMaxRW       = OClassID(C.DAOS_OC_REPL_MAX_RW)
+	endOfObjectClasses   = ClassReplMaxRW
 )
+
+func ObjectClassList() []OClassID {
+	var classes []OClassID
+	for cls := startOfObjectClasses; cls <= endOfObjectClasses; cls++ {
+		classes = append(classes, cls)
+	}
+	return classes
+}
 
 // ObjectIDInit initializes an ObjectID
 func ObjectIDInit(hi uint32, mid, lo uint64, class OClassID) *ObjectID {

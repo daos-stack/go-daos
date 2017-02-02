@@ -39,6 +39,10 @@ func init() {
 					poolFlag,
 					groupFlag,
 					contFlag,
+					objLoFlag,
+					objMidFlag,
+					objHiFlag,
+					objClassFlag,
 				},
 			},
 			{
@@ -50,6 +54,10 @@ func init() {
 					poolFlag,
 					groupFlag,
 					contFlag,
+					objLoFlag,
+					objMidFlag,
+					objHiFlag,
+					objClassFlag,
 					cli.StringFlag{
 						Name:  "dkey",
 						Usage: "List the akeys for this dkey",
@@ -159,7 +167,8 @@ func objDkeys(c *cli.Context) error {
 	}
 	defer coh.Close()
 
-	oid := daos.ObjectIDInit(0, 0, 2, daos.ClassLargeRW)
+	oClass := c.Generic("objc").(*objectClass)
+	oid := daos.ObjectIDInit((uint32)(c.Uint("objh")), c.Uint64("objm"), c.Uint64("objl"), oClass.Value())
 
 	oh, err := coh.ObjectOpen(oid, daos.EpochMax, daos.ObjOpenRW)
 	if err != nil {
@@ -194,7 +203,8 @@ func objAkeys(c *cli.Context) error {
 	}
 	defer coh.Close()
 
-	oid := daos.ObjectIDInit(0, 0, 2, daos.ClassLargeRW)
+	oClass := c.Generic("objc").(*objectClass)
+	oid := daos.ObjectIDInit((uint32)(c.Uint("objh")), c.Uint64("objm"), c.Uint64("objl"), oClass.Value())
 
 	oh, err := coh.ObjectOpen(oid, daos.EpochMax, daos.ObjOpenRW)
 	if err != nil {
