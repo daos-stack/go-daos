@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/rread/go-daos/pkg/daos"
+	"github.com/daos-stack/go-daos/pkg/daos"
 
 	"github.com/pkg/errors"
 	cli "gopkg.in/urfave/cli.v1"

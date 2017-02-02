@@ -6,7 +6,7 @@ import (
 	"os/user"
 	"time"
 
-	"github.com/rread/go-daos/pkg/daos"
+	"github.com/daos-stack/go-daos/pkg/daos"
 
 	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"

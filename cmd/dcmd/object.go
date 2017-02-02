@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/daos-stack/go-daos/pkg/daos"
 	"github.com/pkg/errors"
-	"github.com/rread/go-daos/pkg/daos"
 
 	cli "gopkg.in/urfave/cli.v1"
 )

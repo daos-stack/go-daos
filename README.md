@@ -23,14 +23,14 @@ was in the DAOS [README](https://github.com/daos-stack/daos/blob/master/README.m
 	export PATH=${daospath}/install/bin:$PATH
 	export CGO_CPPFLAGS="-I${daospath}/install/include -I${daospath}/src/include"
 	export CGO_LDFLAGS=-L${daospath}/install/lib 
-	go get -u github.com/rread/go-daos/cmd/dcmd
+	go get -u github.com/daos-stack/go-daos/cmd/dcmd
 
 The last command will clone this repo and and its dependencies, build,
 and install in the Go workspace. The `dcmd` binary will be in
 `$GOPATH/bin/dcmd` and the source for the package will be
-`$GOPATH/src/github.com/rread/go-daos`. You can build again using:
+`$GOPATH/src/github.com/daos-stack/go-daos`. You can build again using:
 
-	go install github.com/rread/go-daos/cmd/dcmd
+	go install github.com/daos-stack/go-daos/cmd/dcmd
 
 ## dcmd utility
 
