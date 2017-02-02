@@ -32,7 +32,7 @@ func init() {
 			},
 			{
 				Name:      "dkeys",
-				Usage:     "Create an object in  a container",
+				Usage:     "List dkeys of an object (currently same object created by hello)",
 				ArgsUsage: "[uuid [uuid...]]",
 				Action:    daosCommand(objDkeys),
 				Flags: []cli.Flag{
@@ -43,7 +43,7 @@ func init() {
 			},
 			{
 				Name:      "akeys",
-				Usage:     "Create an object in  a container",
+				Usage:     "List akeys of an object (currently same object created by hello)",
 				ArgsUsage: "[uuid [uuid...]]",
 				Action:    daosCommand(objAkeys),
 				Flags: []cli.Flag{
@@ -159,7 +159,7 @@ func objDkeys(c *cli.Context) error {
 	}
 	defer coh.Close()
 
-	oid := daos.ObjectIDInit(0, 0, 1, daos.ClassLargeRW)
+	oid := daos.ObjectIDInit(0, 0, 2, daos.ClassLargeRW)
 
 	oh, err := coh.ObjectOpen(oid, daos.EpochMax, daos.ObjOpenRW)
 	if err != nil {
@@ -167,20 +167,17 @@ func objDkeys(c *cli.Context) error {
 	}
 	defer oh.Close()
 
-	dkeys, anchor, err := oh.DistKeys(daos.EpochMax, nil)
-	if err != nil {
-		return err
-	}
+	var anchor daos.Anchor
 	for {
+		dkeys, err := oh.DistKeys(daos.EpochMax, &anchor)
+		if err != nil {
+			return err
+		}
 		if len(dkeys) == 0 {
 			break
 		}
 		for i := range dkeys {
 			fmt.Printf("%v\n", dkeys[i])
-		}
-		dkeys, anchor, err = oh.DistKeys(daos.EpochMax, anchor)
-		if err != nil {
-			return err
 		}
 	}
 	return nil
@@ -207,20 +204,18 @@ func objAkeys(c *cli.Context) error {
 
 	dkey := c.String("dkey")
 
-	dkeys, anchor, err := oh.AttrKeys(daos.EpochMax, []byte(dkey), nil)
-	if err != nil {
-		return err
-	}
+	var anchor daos.Anchor
+
 	for {
-		if len(dkeys) == 0 {
-			break
-		}
-		for i := range dkeys {
-			fmt.Printf("%v\n", dkeys[i])
-		}
-		dkeys, anchor, err = oh.DistKeys(daos.EpochMax, anchor)
+		akeys, err := oh.AttrKeys(daos.EpochMax, []byte(dkey), &anchor)
 		if err != nil {
 			return err
+		}
+		if len(akeys) == 0 {
+			break
+		}
+		for i := range akeys {
+			fmt.Printf("%v\n", akeys[i])
 		}
 	}
 	return nil

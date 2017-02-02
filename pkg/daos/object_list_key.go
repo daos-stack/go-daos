@@ -5,7 +5,7 @@ package daos
 // #include <daos/common.h>
 import "C"
 import (
-	"log"
+	"errors"
 	"unsafe"
 )
 
@@ -15,9 +15,9 @@ type (
 	Anchor             C.daos_hash_out_t
 )
 
-func (oh ObjectHandle) DistKeys(e Epoch, anchor *Anchor) ([][]byte, *Anchor, error) {
+func (oh ObjectHandle) DistKeys(e Epoch, anchor *Anchor) ([][]byte, error) {
 	if anchor == nil {
-		anchor = &Anchor{}
+		return nil, errors.New("anchor must not be null")
 	}
 	kd := make(KeyDescriptorSlice, 32)
 	nr := C.uint32_t(len(kd))
@@ -26,27 +26,25 @@ func (oh ObjectHandle) DistKeys(e Epoch, anchor *Anchor) ([][]byte, *Anchor, err
 
 	rc, err := C.daos_obj_list_dkey(oh.H(), e.Native(), &nr, kd.Pointer(), sg.Pointer(), anchor.Pointer(), nil)
 	if err := rc2err("daos_obj_list_dkey", rc, err); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	data := sg.Data()
-	buf := make([][]byte, 0, int(nr))
+	keys := make([][]byte, 0, int(nr))
 
 	var offset int
 	for i := 0; i < int(nr); i++ {
 		d := kd[i]
-		log.Printf("kd: %#v", d)
-		log.Printf("offset: %d  data: %v", offset, data[offset:3])
-		buf = append(buf, data[offset:int(d.kd_key_len)])
+		keys = append(keys, data[offset:int(d.kd_key_len)])
 		offset += int(d.kd_key_len) + int(d.kd_csum_len)
 	}
 
-	return buf, anchor, nil
+	return keys, nil
 }
 
-func (oh ObjectHandle) AttrKeys(e Epoch, dkey []byte, anchor *Anchor) ([][]byte, *Anchor, error) {
+func (oh ObjectHandle) AttrKeys(e Epoch, dkey []byte, anchor *Anchor) ([][]byte, error) {
 	if anchor == nil {
-		anchor = &Anchor{}
+		return nil, errors.New("anchor must not be null")
 	}
 	distKey := ByteToDistKey(dkey)
 	defer distKey.Free()
@@ -58,20 +56,20 @@ func (oh ObjectHandle) AttrKeys(e Epoch, dkey []byte, anchor *Anchor) ([][]byte,
 
 	rc, err := C.daos_obj_list_akey(oh.H(), e.Native(), distKey.Pointer(), &nr, kd.Pointer(), sg.Pointer(), anchor.Pointer(), nil)
 	if err := rc2err("daos_obj_list_dkey", rc, err); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	data := sg.Data()
-	buf := make([][]byte, 0, int(nr))
+	keys := make([][]byte, 0, int(nr))
 
 	var offset int
 	for i := 0; i < int(nr); i++ {
 		d := kd[i]
-		buf = append(buf, data[offset:int(d.kd_key_len)])
+		keys = append(keys, data[offset:int(d.kd_key_len)])
 		offset += int(d.kd_key_len) + int(d.kd_csum_len)
 	}
 
-	return buf, anchor, nil
+	return keys, nil
 }
 
 func (kdl KeyDescriptorSlice) Free() {
