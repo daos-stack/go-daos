@@ -19,6 +19,23 @@ func daosCommand(cmd func(*cli.Context) error) func(*cli.Context) error {
 	}
 }
 
+var poolFlag = cli.StringFlag{
+	Name:   "pool",
+	Usage:  "UUID of pool to create container in.",
+	EnvVar: "DAOS_POOL",
+}
+
+var groupFlag = cli.StringFlag{
+	Name:   "group, g",
+	Usage:  "Group name of pool servers to use.",
+	EnvVar: "DAOS_GROUP",
+}
+
+var contFlag = cli.StringFlag{
+	Name:  "cont",
+	Usage: "UUID for the new container.",
+}
+
 func init() {
 	poolCommands := cli.Command{
 		Name:  "pool",
@@ -30,10 +47,7 @@ func init() {
 				ArgsUsage: "",
 				Action:    daosCommand(poolCreate),
 				Flags: []cli.Flag{
-					cli.StringFlag{
-						Name:  "group, g",
-						Usage: "Group name of pool servers to use.",
-					},
+					groupFlag,
 					cli.StringFlag{
 						Name:  "uid",
 						Usage: "Owner uid",
@@ -60,10 +74,7 @@ func init() {
 				ArgsUsage: "[uuid [uuid...]]",
 				Action:    daosCommand(poolInfo),
 				Flags: []cli.Flag{
-					cli.StringFlag{
-						Name:  "group, g",
-						Usage: "Group name of pool servers to use.",
-					},
+					groupFlag,
 				},
 			},
 			{
@@ -72,10 +83,7 @@ func init() {
 				ArgsUsage: "[uuid [uuid...]]",
 				Action:    daosCommand(poolDestroy),
 				Flags: []cli.Flag{
-					cli.StringFlag{
-						Name:  "group, g",
-						Usage: "Group name of pool servers to use.",
-					},
+					groupFlag,
 					cli.BoolFlag{
 						Name:  "force, f",
 						Usage: "Foce destroy",

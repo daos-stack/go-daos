@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 
 	cli "gopkg.in/urfave/cli.v1"
@@ -62,6 +63,8 @@ func myMain() int {
 }
 
 func main() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
 	if _, ok := os.LookupEnv("PMIX_RANK"); !ok {
 		relaunch()
 	}

@@ -1,7 +1,7 @@
 package daos
 
 //
-// #cgo LDFLAGS:  -ldaos  -lcrt_util -lcrt -ldaos_common -ldaos_tier -luuid -lpmem
+// #cgo LDFLAGS:  -ldaos  -lcrt_util -lcrt -ldaos_common -ldaos_tier -luuid
 // #include <stdlib.h>
 // #include <daos.h>
 // #include <daos/common.h>
@@ -14,7 +14,6 @@ import "C"
 
 import (
 	"fmt"
-	"log"
 	"unsafe"
 
 	"github.com/pkg/errors"
@@ -622,30 +621,28 @@ type (
 
 	// ObjectHandle refers to an open object
 	ObjectHandle C.daos_handle_t
-	DistKey      IoVec
-	AttrKey      IoVec
-	IODescriptor C.daos_vec_iod_t
-	SGList       C.daos_sg_list_t
-	IoVec        C.daos_iov_t
 )
 
-// StringToIov creates a C buffer with copy of string and returns a go IoVec.
-func StringToIov(s string) *IoVec {
+// ByteToAttrKey creates a C buffer with copy of string and returns a go IoVec.
+// Allocates memory in C, return value must be released with Free()
+func ByteToAttrKey(buf []byte) *AttrKey {
 	var iov IoVec
-	iov.iov_buf = unsafe.Pointer(C.CString(s))
-	iov.iov_buf_len = C.daos_size_t(len(s) + 1)
-	iov.iov_len = iov.iov_buf_len
-	return &iov
+	return (*AttrKey)(copyToIov(&iov, buf))
 }
 
-// ByteToIov creates a C iovec with C buffer initialized with value
-func ByteToIov(value []byte) *IoVec {
-	iov := (*C.daos_iov_t)(C.malloc(C.size_t(unsafe.Sizeof(C.daos_iov_t{}))))
+// ByteToDistKey creates a C buffer with copy of string and returns a go IoVec.
+// Allocates memory in C, return value must be released with Free()
+func ByteToDistKey(buf []byte) *DistKey {
+	var iov IoVec
+	return (*DistKey)(copyToIov(&iov, buf))
+}
+
+func copyToIov(iov *IoVec, value []byte) *IoVec {
 	n := C.size_t(len(value))
 	iov.iov_len = C.daos_size_t(n)
 	iov.iov_buf_len = C.daos_size_t(n)
 	iov.iov_buf = C.CBytes(value)
-	return (*IoVec)(iov)
+	return iov
 }
 
 func (k *IoVec) Free() {
@@ -680,130 +677,32 @@ func (ak *AttrKey) Native() C.daos_akey_t {
 	return C.daos_akey_t(*ak)
 }
 
-func IOD(ak *AttrKey, recSize int) *IODescriptor {
-	var iod IODescriptor
-	iod.vd_name = ak.Native()
-	iod.vd_nr = 1
-	rec := (*C.daos_recx_t)(C.malloc(C.size_t(unsafe.Sizeof(C.daos_recx_t{}))))
-	rec.rx_rsize = C.uint64_t(recSize)
-	rec.rx_idx = 0
-	rec.rx_nr = 1
-	iod.vd_recxs = rec
-	return &iod
-}
-
-func (iod *IODescriptor) Free() {
-	if iod != nil {
-		if iod.vd_recxs != nil {
-			C.free(unsafe.Pointer(iod.vd_recxs))
-			iod.vd_recxs = nil
-		}
-	}
-}
-
-func (iod *IODescriptor) Pointer() *C.daos_vec_iod_t {
-	return (*C.daos_vec_iod_t)(iod)
-}
-
-func SG(value []byte) *SGList {
-	var sg SGList
-	iov := ByteToIov(value)
-	sg.sg_nr.num = 1
-	sg.sg_iovs = iov.Pointer()
-	return &sg
-}
-
-func SGAlloc(sz C.uint64_t) *SGList {
-	var sg SGList
-	iov := (*C.daos_iov_t)(C.malloc(C.size_t(unsafe.Sizeof(C.daos_iov_t{}))))
-	iov.iov_len = C.daos_size_t(sz)
-	iov.iov_buf_len = C.daos_size_t(sz)
-	iov.iov_buf = C.malloc(C.size_t(sz))
-
-	sg.sg_nr.num = 1
-	sg.sg_iovs = iov
-	return &sg
-}
-
-func (sg *SGList) Free() {
-	if sg != nil {
-		if sg.sg_iovs != nil {
-			C.free(unsafe.Pointer(sg.sg_iovs.iov_buf))
-			C.free(unsafe.Pointer(sg.sg_iovs))
-			sg.sg_iovs = nil
-		}
-	}
-}
-
-func (sg *SGList) Pointer() *C.daos_sg_list_t {
-	return (*C.daos_sg_list_t)(sg)
-}
-
 // Put sets the first record of a-key to value, with record size is len(value).
 func (oh *ObjectHandle) Put(e Epoch, dkey string, akey string, value []byte) error {
-	distkey := (*DistKey)(StringToIov(dkey))
-	defer distkey.Free()
+	kr := NewKeyRequest([]byte(akey))
+	kr.Put(0, 1, uint64(len(value)), value)
 
-	attrkey := (*AttrKey)(StringToIov(akey))
-	defer attrkey.Free()
-
-	iod := IOD(attrkey, len(value))
-	defer iod.Free()
-
-	sg := SG(value)
-	defer sg.Free()
-
-	//log.Printf("iov: %#v\nsg: %#v", iod.Pointer(), sg.Pointer())
-	rc, err := C.daos_obj_update(oh.H(), e.Native(), distkey.Pointer(), 1,
-		iod.Pointer(), sg.Pointer(), nil)
-	return rc2err("Put: daos_object_update", rc, err)
+	return oh.Update(e, []byte(dkey), []*KeyRequest{kr})
 }
 
 const (
-	RecAny = C.DAOS_REC_ANY
+	RecAny   = C.DAOS_REC_ANY
+	EpochMax = Epoch(0xffffffffffffffff)
 )
 
 // Get returns first record for a-key.
 func (oh *ObjectHandle) Get(e Epoch, dkey string, akey string) ([]byte, error) {
-	distkey := (*DistKey)(StringToIov(dkey))
-	defer distkey.Free()
+	kr := NewKeyRequest([]byte(akey))
+	kr.Get(0, 1, RecAny)
 
-	attrkey := (*AttrKey)(StringToIov(akey))
-	defer attrkey.Free()
-
-	iod := IOD(attrkey, RecAny)
-	defer iod.Free()
-
-	// Fetch record size
-	rc, err := C.daos_obj_fetch(oh.H(), e.Native(), distkey.Pointer(), 1,
-		iod.Pointer(), nil, nil, nil)
-	if err = rc2err("Get: daos_object_fetch", rc, err); err != nil {
-		return nil, err
-	}
-
-	recSize := iod.vd_recxs.rx_rsize
-	if recSize == 0 {
-		return nil, errors.New("zero recsize")
-	}
-	log.Printf("found record size: %d", recSize)
-
-	sg := SGAlloc(recSize)
-	defer sg.Free()
-
-	//log.Printf("iod: %#v\nvd_recxs: %#v\nsg: %#v\nsg_iovs:%#v", iod.Pointer(), iod.vd_recxs, sg.Pointer(), sg.sg_iovs)
-	rc, err = C.daos_obj_fetch(oh.H(), e.Native(), distkey.Pointer(), 1,
-		iod.Pointer(), sg.Pointer(), nil, nil)
-	err = rc2err("Get: daos_object_fetch", rc, err)
+	err := oh.Fetch(e, []byte(dkey), []*KeyRequest{kr})
 	if err != nil {
 		return nil, err
 	}
-	var buf []byte
-	if sg.sg_nr.num_out == 1 {
-		buf = C.GoBytes(unsafe.Pointer(sg.sg_iovs.iov_buf), C.int(sg.sg_iovs.iov_buf_len))
-	} else {
-		log.Printf("num: %d num_out %d records", sg.sg_nr.num, sg.sg_nr.num_out)
+
+	if len(kr.Buffers) > 0 {
+		return kr.Buffers[0], nil
 	}
 
-	return buf, nil
-
+	return nil, nil
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/pkg/errors"
@@ -20,21 +21,38 @@ func init() {
 				ArgsUsage: "[uuid [uuid...]]",
 				Action:    daosCommand(objHello),
 				Flags: []cli.Flag{
-					cli.StringFlag{
-						Name:  "pool",
-						Usage: "UUID of pool to create container in.",
-					},
-					cli.StringFlag{
-						Name:  "group, g",
-						Usage: "Group name of pool servers to use.",
-					},
-					cli.StringFlag{
-						Name:  "cont",
-						Usage: "UUID for the new container.",
-					},
+					poolFlag,
+					groupFlag,
+					contFlag,
 					cli.StringFlag{
 						Name:  "value",
 						Usage: "value for object.",
+					},
+				},
+			},
+			{
+				Name:      "dkeys",
+				Usage:     "Create an object in  a container",
+				ArgsUsage: "[uuid [uuid...]]",
+				Action:    daosCommand(objDkeys),
+				Flags: []cli.Flag{
+					poolFlag,
+					groupFlag,
+					contFlag,
+				},
+			},
+			{
+				Name:      "akeys",
+				Usage:     "Create an object in  a container",
+				ArgsUsage: "[uuid [uuid...]]",
+				Action:    daosCommand(objAkeys),
+				Flags: []cli.Flag{
+					poolFlag,
+					groupFlag,
+					contFlag,
+					cli.StringFlag{
+						Name:  "dkey",
+						Usage: "List the akeys for this dkey",
 					},
 				},
 			},
@@ -44,12 +62,12 @@ func init() {
 }
 
 func objHello(c *cli.Context) error {
-	group := c.String("group")
-	log.Printf("open pool: %v", c.String("pool"))
-	poh, err := daos.PoolConnect(c.String("pool"), group, daos.PoolConnectRW)
+	poh, err := openPool(c, daos.PoolConnectRW)
 	if err != nil {
 		return errors.Wrap(err, "connect failed")
 	}
+	defer poh.Disconnect()
+
 	log.Printf("open container: %v", c.String("cont"))
 	coh, err := poh.Open(c.String("cont"), daos.ContOpenRW)
 	if err != nil {
@@ -75,7 +93,7 @@ func objHello(c *cli.Context) error {
 
 	log.Printf("held epoch %s", e)
 
-	oid := daos.ObjectIDInit(0, 0, 1, daos.ClassTinyRW)
+	oid := daos.ObjectIDInit(0, 0, 1, daos.ClassLargeRW)
 
 	err = coh.ObjectDeclare(oid, e, nil)
 	if err != nil {
@@ -103,5 +121,107 @@ func objHello(c *cli.Context) error {
 		return errors.Wrap(err, "put failed failed")
 	}
 	log.Printf("fetched buf '%s'", buf)
+	return nil
+}
+
+func openPool(c *cli.Context, flags uint) (*daos.PoolHandle, error) {
+	group := c.String("group")
+	pool := c.String("pool")
+	if pool == "" {
+		return nil, errors.New("no pool uuid provided")
+	}
+
+	poh, err := daos.PoolConnect(pool, group, flags)
+	if err != nil {
+		return nil, errors.Wrap(err, "connect failed")
+	}
+	return poh, nil
+}
+
+func objPut(c *cli.Context) error {
+	poh, err := openPool(c, daos.PoolConnectRW)
+	if err != nil {
+		return err
+	}
+	defer poh.Disconnect()
+	return nil
+
+}
+
+func objDkeys(c *cli.Context) error {
+	poh, err := openPool(c, daos.PoolConnectRW)
+	if err != nil {
+		return err
+	}
+	coh, err := poh.Open(c.String("cont"), daos.ContOpenRW)
+	if err != nil {
+		return errors.Wrap(err, "open container failed")
+	}
+	defer coh.Close()
+
+	oid := daos.ObjectIDInit(0, 0, 1, daos.ClassLargeRW)
+
+	oh, err := coh.ObjectOpen(oid, daos.EpochMax, daos.ObjOpenRW)
+	if err != nil {
+		return errors.Wrap(err, "open object failed")
+	}
+	defer oh.Close()
+
+	dkeys, anchor, err := oh.DistKeys(daos.EpochMax, nil)
+	if err != nil {
+		return err
+	}
+	for {
+		if len(dkeys) == 0 {
+			break
+		}
+		for i := range dkeys {
+			fmt.Printf("%v\n", dkeys[i])
+		}
+		dkeys, anchor, err = oh.DistKeys(daos.EpochMax, anchor)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func objAkeys(c *cli.Context) error {
+	poh, err := openPool(c, daos.PoolConnectRW)
+	if err != nil {
+		return err
+	}
+	coh, err := poh.Open(c.String("cont"), daos.ContOpenRW)
+	if err != nil {
+		return errors.Wrap(err, "open container failed")
+	}
+	defer coh.Close()
+
+	oid := daos.ObjectIDInit(0, 0, 1, daos.ClassLargeRW)
+
+	oh, err := coh.ObjectOpen(oid, daos.EpochMax, daos.ObjOpenRW)
+	if err != nil {
+		return errors.Wrap(err, "open object failed")
+	}
+	defer oh.Close()
+
+	dkey := c.String("dkey")
+
+	dkeys, anchor, err := oh.AttrKeys(daos.EpochMax, []byte(dkey), nil)
+	if err != nil {
+		return err
+	}
+	for {
+		if len(dkeys) == 0 {
+			break
+		}
+		for i := range dkeys {
+			fmt.Printf("%v\n", dkeys[i])
+		}
+		dkeys, anchor, err = oh.DistKeys(daos.EpochMax, anchor)
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }

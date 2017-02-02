@@ -45,8 +45,9 @@ This will create a single object and attempt to write and then read a
 value:
 
 	cont=$(uuidgen)
-	pool=$(dcmd pool create)
-	dcmd cont create --pool $pool --uuid $cont
-	dcmd object hello --pool $pool --cont $cont --value "world"
+	export DAOS_GROUP="" # if needed
+	export DAOS_POOL=$(dcmd pool create)
+	dcmd cont create --uuid $cont
+	dcmd object hello --cont $cont --value "world"
 
 

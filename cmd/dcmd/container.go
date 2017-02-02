@@ -19,14 +19,8 @@ func init() {
 				ArgsUsage: "[uuid [uuid...]]",
 				Action:    daosCommand(contCreate),
 				Flags: []cli.Flag{
-					cli.StringFlag{
-						Name:  "pool",
-						Usage: "UUID of pool to create container in.",
-					},
-					cli.StringFlag{
-						Name:  "group, g",
-						Usage: "Group name of pool servers to use.",
-					},
+					poolFlag,
+					groupFlag,
 					cli.StringFlag{
 						Name:  "uuid",
 						Usage: "UUID for the new container.",
@@ -39,14 +33,8 @@ func init() {
 				ArgsUsage: "[uuid [uuid...]]",
 				Action:    daosCommand(contInfo),
 				Flags: []cli.Flag{
-					cli.StringFlag{
-						Name:  "pool",
-						Usage: "UUID of pool to create container in.",
-					},
-					cli.StringFlag{
-						Name:  "group, g",
-						Usage: "Group name of pool servers to use.",
-					},
+					poolFlag,
+					groupFlag,
 				},
 			},
 			{
@@ -55,10 +43,8 @@ func init() {
 				ArgsUsage: "[uuid [uuid...]]",
 				Action:    daosCommand(contDestroy),
 				Flags: []cli.Flag{
-					cli.StringFlag{
-						Name:  "pool",
-						Usage: "UUID of pool to create container in.",
-					},
+					poolFlag,
+					groupFlag,
 					cli.BoolFlag{
 						Name:  "force, f",
 						Usage: "Foce destroy",
@@ -71,11 +57,9 @@ func init() {
 }
 
 func contCreate(c *cli.Context) error {
-	group := c.String("group")
-
-	poh, err := daos.PoolConnect(c.String("pool"), group, daos.PoolConnectRW)
+	poh, err := openPool(c, daos.PoolConnectRW)
 	if err != nil {
-		return errors.Wrap(err, "connect failed")
+		return errors.Wrap(err, "open pool")
 	}
 	defer poh.Disconnect()
 
@@ -84,11 +68,9 @@ func contCreate(c *cli.Context) error {
 }
 
 func contInfo(c *cli.Context) error {
-	group := c.String("group")
-
-	poh, err := daos.PoolConnect(c.String("pool"), group, daos.PoolConnectRW)
+	poh, err := openPool(c, daos.PoolConnectRW)
 	if err != nil {
-		return errors.Wrap(err, "connect failed")
+		return errors.Wrap(err, "open pool")
 	}
 	defer poh.Disconnect()
 
