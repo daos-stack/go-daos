@@ -105,13 +105,13 @@ func poolCreate(c *cli.Context) error {
 		return errors.Wrap(err, "unable to create pool")
 	}
 
-	poh, err := openPool(c, daos.PoolConnectRW)
+	poh, err := daos.PoolConnect(uuid, group, daos.PoolConnectRW)
 	if err != nil {
 		return errors.Wrap(err, "connect failed")
 	}
 	defer poh.Disconnect()
 
-	err = PoolMetaInit(poh, c.String("pool"))
+	err = PoolMetaInit(poh, uuid)
 	if err != nil {
 		return errors.Wrap(err, "pool meta init")
 	}

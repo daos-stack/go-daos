@@ -199,7 +199,7 @@ func objDkeys(c *cli.Context) error {
 			break
 		}
 		for i := range dkeys {
-			fmt.Printf("%v\n", dkeys[i])
+			fmt.Printf("%s\n", dkeys[i])
 		}
 	}
 	return nil
@@ -246,7 +246,7 @@ func objAkeys(c *cli.Context) error {
 			break
 		}
 		for i := range akeys {
-			fmt.Printf("%v\n", akeys[i])
+			fmt.Printf("%s\n", akeys[i])
 		}
 	}
 	return nil
