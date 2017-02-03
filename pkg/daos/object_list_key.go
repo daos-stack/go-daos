@@ -35,7 +35,7 @@ func (oh ObjectHandle) DistKeys(e Epoch, anchor *Anchor) ([][]byte, error) {
 	var offset int
 	for i := 0; i < int(nr); i++ {
 		d := kd[i]
-		keys = append(keys, data[offset:int(d.kd_key_len)])
+		keys = append(keys, data[offset:offset+int(d.kd_key_len)])
 		offset += int(d.kd_key_len) + int(d.kd_csum_len)
 	}
 
@@ -65,7 +65,7 @@ func (oh ObjectHandle) AttrKeys(e Epoch, dkey []byte, anchor *Anchor) ([][]byte,
 	var offset int
 	for i := 0; i < int(nr); i++ {
 		d := kd[i]
-		keys = append(keys, data[offset:int(d.kd_key_len)])
+		keys = append(keys, data[offset:offset+int(d.kd_key_len)])
 		offset += int(d.kd_key_len) + int(d.kd_csum_len)
 	}
 

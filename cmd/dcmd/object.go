@@ -166,7 +166,15 @@ func objDkeys(c *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	coh, err := poh.Open(c.String("cont"), daos.ContOpenRW)
+	defer poh.Disconnect()
+
+	pm, err := OpenMeta(poh, c.String("pool"), false)
+	if err != nil {
+		return errors.Wrap(err, "open meta")
+	}
+	defer pm.Close()
+
+	coh, err := pm.OpenContainer(c.String("cont"), daos.ContOpenRW)
 	if err != nil {
 		return errors.Wrap(err, "open container failed")
 	}
@@ -174,7 +182,7 @@ func objDkeys(c *cli.Context) error {
 
 	oClass := c.Generic("objc").(*objectClass)
 	oid := daos.ObjectIDInit((uint32)(c.Uint("objh")), c.Uint64("objm"), c.Uint64("objl"), oClass.Value())
-
+	log.Printf("oid: %s", oid)
 	oh, err := coh.ObjectOpen(oid, daos.EpochMax, daos.ObjOpenRW)
 	if err != nil {
 		return errors.Wrap(err, "open object failed")
@@ -202,7 +210,15 @@ func objAkeys(c *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	coh, err := poh.Open(c.String("cont"), daos.ContOpenRW)
+	defer poh.Disconnect()
+
+	pm, err := OpenMeta(poh, c.String("pool"), false)
+	if err != nil {
+		return errors.Wrap(err, "open meta")
+	}
+	defer pm.Close()
+
+	coh, err := pm.OpenContainer(c.String("cont"), daos.ContOpenRW)
 	if err != nil {
 		return errors.Wrap(err, "open container failed")
 	}

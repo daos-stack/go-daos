@@ -235,7 +235,7 @@ func (pm *PoolMeta) LookupContainer(name string) (string, error) {
 func (pm *PoolMeta) OpenContainer(cont string, flags int) (*daos.ContHandle, error) {
 	id, err := pm.LookupContainer(cont)
 	if err != nil {
-		log.Printf("%s: lookup failed,  a uuid", cont)
+		log.Printf("%s: lookup failed, assuming uuid", cont)
 		id = cont
 	}
 
