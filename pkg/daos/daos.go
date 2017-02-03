@@ -13,9 +13,12 @@ package daos
 import "C"
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"unsafe"
 
+	"github.com/pborman/uuid"
 	"github.com/pkg/errors"
 )
 
@@ -65,22 +68,22 @@ func rc2err(label string, rc C.int, err error) error {
 	return nil
 }
 
-func uuid2str(uuid []C.uchar) string {
-	var buf [37]C.char
-	C.uuid_unparse_lower((*C.uchar)(unsafe.Pointer(&uuid[0])), (*C.char)(unsafe.Pointer(&buf[0])))
-	return C.GoString((*C.char)(unsafe.Pointer(&buf[0])))
+// uuid2str converts a buffer that may or may not have come from C land
+// so we must allocate Go memory here just in case.
+func uuid2str(cuuid []C.uchar) string {
+	buf := C.GoBytes(unsafe.Pointer(&cuuid[0]), C.int(len(cuuid)))
+	id := uuid.UUID([]byte(buf))
+	return id.String()
 }
 
 // Analog to uuid2str but returns *C.uchar for convenience.
+// Returns uuid in Go memory
 func str2uuid(s string) (*C.uchar, error) {
-	var uuid [16]C.uchar
-	cstr := C.CString(s)
-	defer C.free(unsafe.Pointer(cstr))
-	rc, err := C.uuid_parse(cstr, (*C.uchar)(unsafe.Pointer(&uuid[0])))
-	if rc != 0 {
-		return nil, rc2err("uuid_parse", rc, err)
+	id := uuid.Parse(s)
+	if id == nil {
+		return nil, errors.New("Unable to parse UUID")
 	}
-	return (*C.uchar)(unsafe.Pointer(&uuid[0])), nil
+	return (*C.uchar)(unsafe.Pointer(&id[0])), nil
 }
 
 // PoolCreate creates a new pool of specfied size.
@@ -134,6 +137,7 @@ func PoolDestroy(pool string, group string, force int) error {
 	if err != nil {
 		return errors.Wrapf(err, "unable to parse %s", pool)
 	}
+
 	rc, err := C.daos_pool_destroy(uuid, cGroup, C.int(force), nil)
 	return rc2err("daos_pool_destroy", rc, err)
 }
@@ -525,8 +529,8 @@ type Hash C.daos_hash_out_t
 type OClassID C.daos_oclass_id_t
 type ObjectID C.daos_obj_id_t
 
-func (o *ObjectID) String() string {
-	return fmt.Sprintf("%d.%d.%d", o.hi, o.mid, o.lo)
+func (o ObjectID) String() string {
+	return fmt.Sprintf("0x%x.0x%x.0x%x", o.hi, o.mid, o.lo)
 }
 
 func (o *ObjectID) Native() C.daos_obj_id_t {
@@ -535,6 +539,34 @@ func (o *ObjectID) Native() C.daos_obj_id_t {
 
 func (o *ObjectID) Pointer() *C.daos_obj_id_t {
 	return (*C.daos_obj_id_t)(o)
+}
+
+func (o *ObjectID) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + o.String() + `"`), nil
+}
+
+func (o *ObjectID) UnmarshalJSON(b []byte) error {
+	if b[0] == '"' {
+		b = b[1 : len(b)-1]
+	}
+	oid, err := ParseOID(string(b))
+	if err != nil {
+		return err
+	}
+	*o = *oid
+	return nil
+}
+
+func ParseOID(s string) (*ObjectID, error) {
+	var o ObjectID
+	n, err := fmt.Sscanf(s, "0x%x.0x%x.0x%x", &o.hi, &o.mid, &o.lo)
+	if err != nil {
+		return nil, errors.Wrap(err, "scan oid")
+	}
+	if n != 3 {
+		return nil, errors.Errorf("unable to parse string %v", s)
+	}
+	return &o, nil
 }
 
 func (c OClassID) Native() C.daos_oclass_id_t {
@@ -577,6 +609,17 @@ func ObjectClassList() []OClassID {
 	return classes
 }
 
+// GenerateOID returns a random OID
+// The ID is derived from a Random  UUID, so should
+// reasonably unique.
+func GenerateOID(oc OClassID) *ObjectID {
+	id := uuid.NewRandom()
+	buf := bytes.NewReader([]byte(id))
+	var lomed struct{ Med, Lo uint64 }
+	binary.Read(buf, binary.BigEndian, &lomed)
+	return ObjectIDInit(0, lomed.Med, lomed.Lo, oc)
+}
+
 // ObjectIDInit initializes an ObjectID
 func ObjectIDInit(hi uint32, mid, lo uint64, class OClassID) *ObjectID {
 	var oid ObjectID
@@ -610,15 +653,17 @@ func (coh *ContHandle) ObjectDeclare(oid *ObjectID, e Epoch, oa *ObjectAttribute
 	return rc2err("daos_obj_declare", rc, err)
 }
 
+type ObjectOpenFlag uint
+
 const (
-	ObjOpenRO     = C.DAOS_OO_RO
-	ObjOpenRW     = C.DAOS_OO_RW
-	ObjOpenExcl   = C.DAOS_OO_EXCL
-	ObjOpenIORand = C.DAOS_OO_IO_RAND
-	ObjOpenIOSeq  = C.DAOS_OO_IO_SEQ
+	ObjOpenRO     = ObjectOpenFlag(C.DAOS_OO_RO)
+	ObjOpenRW     = ObjectOpenFlag(C.DAOS_OO_RW)
+	ObjOpenExcl   = ObjectOpenFlag(C.DAOS_OO_EXCL)
+	ObjOpenIORand = ObjectOpenFlag(C.DAOS_OO_IO_RAND)
+	ObjOpenIOSeq  = ObjectOpenFlag(C.DAOS_OO_IO_SEQ)
 )
 
-func (coh *ContHandle) ObjectOpen(oid *ObjectID, e Epoch, mode uint) (*ObjectHandle, error) {
+func (coh *ContHandle) ObjectOpen(oid *ObjectID, e Epoch, mode ObjectOpenFlag) (*ObjectHandle, error) {
 	var oh ObjectHandle
 	rc, err := C.daos_obj_open(coh.H(), oid.Native(), e.Native(), C.uint(mode), oh.Pointer(), nil)
 	if err := rc2err("daos_obj_open", rc, err); err != nil {

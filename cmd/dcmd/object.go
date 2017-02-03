@@ -68,7 +68,6 @@ func init() {
 	}
 	commands = append(commands, objCommands)
 }
-
 func objHello(c *cli.Context) error {
 	poh, err := openPool(c, daos.PoolConnectRW)
 	if err != nil {
@@ -76,8 +75,14 @@ func objHello(c *cli.Context) error {
 	}
 	defer poh.Disconnect()
 
+	pm, err := OpenMeta(poh, c.String("pool"), false)
+	if err != nil {
+		return errors.Wrap(err, "open meta")
+	}
+	defer pm.Close()
+
 	log.Printf("open container: %v", c.String("cont"))
-	coh, err := poh.Open(c.String("cont"), daos.ContOpenRW)
+	coh, err := pm.OpenContainer(c.String("cont"), daos.ContOpenRW)
 	if err != nil {
 		return errors.Wrap(err, "open container failed")
 	}

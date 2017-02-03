@@ -1,10 +1,7 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"os/user"
-	"time"
 
 	"github.com/daos-stack/go-daos/pkg/daos"
 
@@ -108,70 +105,32 @@ func poolCreate(c *cli.Context) error {
 		return errors.Wrap(err, "unable to create pool")
 	}
 
+	poh, err := openPool(c, daos.PoolConnectRW)
+	if err != nil {
+		return errors.Wrap(err, "connect failed")
+	}
+	defer poh.Disconnect()
+
+	err = PoolMetaInit(poh, c.String("pool"))
+	if err != nil {
+		return errors.Wrap(err, "pool meta init")
+	}
+
 	fmt.Printf("%v\n", uuid)
 	return nil
 }
 
-const (
-	PoolMetaDkey = "metadata"
-	CreatorAkey  = "creator"
-	CreatedAkey  = "created"
-)
-
 func poolInit(c *cli.Context) error {
 	poh, err := openPool(c, daos.PoolConnectRW)
 	if err != nil {
-		return errors.Wrap(err, "unable to connect to pool")
+		return errors.Wrap(err, "connect failed")
 	}
 	defer poh.Disconnect()
-	err = poh.NewContainer(c.String("pool"))
-	if err != nil {
-		return errors.Wrap(err, "unable to create pool metadata container")
-	}
 
-	coh, err := poh.Open(c.String("pool"), daos.ContOpenRW)
+	err = PoolMetaInit(poh, c.String("pool"))
 	if err != nil {
-		return errors.Wrap(err, "open container failed")
+		return errors.Wrap(err, "pool meta init")
 	}
-	defer coh.Close()
-
-	e, err := coh.EpochHold(0)
-	if err != nil {
-		return errors.Wrap(err, "epoch hold failed")
-	}
-
-	oid := daos.ObjectIDInit(0, 0, 1, daos.ClassLargeRW)
-
-	err = coh.ObjectDeclare(oid, e, nil)
-	if err != nil {
-		return errors.Wrap(err, "obj declare failed")
-	}
-
-	oh, err := coh.ObjectOpen(oid, daos.EpochMax, daos.ObjOpenRW)
-	if err != nil {
-		return errors.Wrap(err, "open object failed")
-	}
-	defer oh.Close()
-	user, err := user.Current()
-	if err != nil {
-		return errors.Wrap(err, "lookup current user")
-	}
-
-	err = oh.Put(e, PoolMetaDkey, CreatorAkey, []byte(user.Name))
-	if err != nil {
-		return errors.Wrap(err, "put failed")
-	}
-
-	b, err := json.Marshal(time.Now())
-	if err != nil {
-		return errors.Wrap(err, "put failed")
-	}
-
-	err = oh.Put(e, PoolMetaDkey, CreatedAkey, b)
-	if err != nil {
-		return errors.Wrap(err, "put failed")
-	}
-	coh.EpochCommit(e)
 	return nil
 }
 
@@ -186,43 +145,27 @@ func poolInfo(c *cli.Context) error {
 	if err != nil {
 		return errors.Wrap(err, "query failed")
 	}
-
-	// Fetch pool info from metadata container
-	coh, err := poh.Open(c.String("pool"), daos.ContOpenRO)
+	pm, err := OpenMeta(poh, c.String("pool"), false)
+	defer pm.Close()
+	creator, err := pm.Creator()
 	if err != nil {
-		return errors.Wrap(err, "open container failed")
+		return err
 	}
-	defer coh.Close()
-
-	oid := daos.ObjectIDInit(0, 0, 1, daos.ClassLargeRW)
-
-	oh, err := coh.ObjectOpen(oid, daos.EpochMax, daos.ObjOpenRO)
+	created, err := pm.Created()
 	if err != nil {
-		return errors.Wrap(err, "open object failed")
+		return err
 	}
-	defer oh.Close()
-
-	creator, err := oh.Get(daos.EpochMax, PoolMetaDkey, CreatorAkey)
+	conttab, err := pm.ContTable()
 	if err != nil {
-		return errors.Wrap(err, "get creator failed")
+		return err
 	}
-
-	buf, err := oh.Get(daos.EpochMax, PoolMetaDkey, CreatedAkey)
-	if err != nil {
-		return errors.Wrap(err, "get created failed")
-	}
-	var created time.Time
-	err = json.Unmarshal(buf, &created)
-	if err != nil {
-		return errors.Wrapf(err, "create time: %s", buf)
-	}
-
-	fmt.Printf("Pool:     %s\n", info.UUID())
-	fmt.Printf("Mode:     0%o\n", info.Mode())
-	fmt.Printf("Targets:  %d\n", info.NumTargets())
-	fmt.Printf("Disabled: %d\n", info.NumDisabled())
-	fmt.Printf("Creator:  %s\n", creator)
-	fmt.Printf("Created:  %s\n", created)
+	fmt.Printf("Pool:       %s\n", info.UUID())
+	fmt.Printf("Mode:       0%o\n", info.Mode())
+	fmt.Printf("Targets:    %d\n", info.NumTargets())
+	fmt.Printf("Disabled:   %d\n", info.NumDisabled())
+	fmt.Printf("Creator:    %s\n", creator)
+	fmt.Printf("Created:    %s\n", created)
+	fmt.Printf("ContTable:  %s\n", conttab)
 
 	return nil
 }

@@ -47,7 +47,7 @@ value:
 	cont=$(uuidgen)
 	export DAOS_GROUP="" # if needed
 	export DAOS_POOL=$(dcmd pool create)
-	dcmd cont create --uuid $cont
-	dcmd object hello --cont $cont --value "world"
+	dcmd cont create --name mydb
+	dcmd object hello --cont mydb --value "world"
 
 
