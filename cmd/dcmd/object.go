@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/hex"
 	"fmt"
 	"log"
 
@@ -84,6 +86,18 @@ func init() {
 					cli.StringFlag{
 						Name:  "akey",
 						Usage: "The akey to lookup",
+					},
+					cli.IntFlag{
+						Name:  "epoch, e",
+						Usage: "Epoch to use to fetch data. Default is GHCE",
+					},
+					cli.BoolFlag{
+						Name:  "hex, x",
+						Usage: "Print data as hex value (useful for binary data.",
+					},
+					cli.BoolFlag{
+						Name:  "verbose, v",
+						Usage: "Print chatty messages ",
 					},
 				},
 			},
@@ -270,6 +284,7 @@ func objAkeys(c *cli.Context) error {
 }
 
 func objFetch(c *cli.Context) error {
+	verbose := c.Bool("verbose")
 	poh, err := openPool(c, daos.PoolConnectRW)
 	if err != nil {
 		return err
@@ -288,27 +303,42 @@ func objFetch(c *cli.Context) error {
 	}
 	defer coh.Close()
 
-	es, err := coh.EpochQuery()
-	if err != nil {
-		return errors.Wrap(err, "epoch query")
-	}
+	epoch := daos.Epoch(c.Uint("epoch"))
+	if epoch == 0 {
+		es, err := coh.EpochQuery()
+		if err != nil {
+			return errors.Wrap(err, "epoch query")
+		}
 
-	hce := es.GHCE()
+		epoch = es.GHCE()
+	}
 
 	oClass := c.Generic("objc").(*daos.OClassID)
 	oid := daos.ObjectIDInit((uint32)(c.Uint("objh")), c.Uint64("objm"), c.Uint64("objl"), *oClass)
 
-	log.Printf("object: %s", oid)
-	oh, err := coh.ObjectOpen(oid, hce, daos.ObjOpenRW)
+	oh, err := coh.ObjectOpen(oid, epoch, daos.ObjOpenRW)
 	if err != nil {
 		return errors.Wrap(err, "open object failed")
 	}
 	defer oh.Close()
 
-	value, err := oh.Get(hce, c.String("dkey"), c.String("akey"))
+	value, err := oh.Get(epoch, c.String("dkey"), c.String("akey"))
 	if err != nil {
 		return errors.Wrap(err, "get key")
+
 	}
-	fmt.Printf("%s/%s: %s\n", c.String("dkey"), c.String("akey"), value)
+	if verbose {
+		fmt.Printf("epoch: %d\n", epoch)
+		fmt.Printf("object: %s\n", oid)
+		fmt.Printf("%s/%s: ", c.String("dkey"), c.String("akey"))
+	}
+	if c.Bool("hex") || bytes.ContainsRune(value, 0) {
+		if verbose {
+			fmt.Println()
+		}
+		fmt.Print(hex.Dump(value))
+	} else {
+		fmt.Printf("%s\n", value)
+	}
 	return nil
 }
