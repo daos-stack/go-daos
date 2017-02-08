@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"strings"
 	"unsafe"
 
 	"github.com/pborman/uuid"
@@ -573,6 +574,17 @@ func ParseOID(s string) (*ObjectID, error) {
 
 func (c OClassID) Native() C.daos_oclass_id_t {
 	return C.daos_oclass_id_t(c)
+}
+
+func (c *OClassID) Set(value string) error {
+	for _, cls := range ObjectClassList() {
+		if strings.ToUpper(value) == strings.ToUpper(cls.String()) {
+			*c = cls
+			return nil
+		}
+	}
+
+	return errors.Errorf("Unable to find DAOS Object class %q", value)
 }
 
 func (c OClassID) String() string {

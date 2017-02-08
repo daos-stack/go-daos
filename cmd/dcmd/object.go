@@ -64,6 +64,29 @@ func init() {
 					},
 				},
 			},
+			{
+				Name:      "fetch",
+				Usage:     "Fetch akey of an object)",
+				ArgsUsage: "[uuid [uuid...]]",
+				Action:    daosCommand(objFetch),
+				Flags: []cli.Flag{
+					poolFlag,
+					groupFlag,
+					contFlag,
+					objLoFlag,
+					objMidFlag,
+					objHiFlag,
+					objClassFlag,
+					cli.StringFlag{
+						Name:  "dkey",
+						Usage: "The dkey to fetch from",
+					},
+					cli.StringFlag{
+						Name:  "akey",
+						Usage: "The akey to lookup",
+					},
+				},
+			},
 		},
 	}
 	commands = append(commands, objCommands)
@@ -180,8 +203,8 @@ func objDkeys(c *cli.Context) error {
 	}
 	defer coh.Close()
 
-	oClass := c.Generic("objc").(*objectClass)
-	oid := daos.ObjectIDInit((uint32)(c.Uint("objh")), c.Uint64("objm"), c.Uint64("objl"), oClass.Value())
+	oClass := c.Generic("objc").(*daos.OClassID)
+	oid := daos.ObjectIDInit((uint32)(c.Uint("objh")), c.Uint64("objm"), c.Uint64("objl"), *oClass)
 	log.Printf("oid: %s", oid)
 	oh, err := coh.ObjectOpen(oid, daos.EpochMax, daos.ObjOpenRW)
 	if err != nil {
@@ -221,8 +244,8 @@ func objAkeys(c *cli.Context) error {
 	}
 	defer coh.Close()
 
-	oClass := c.Generic("objc").(*objectClass)
-	oid := daos.ObjectIDInit((uint32)(c.Uint("objh")), c.Uint64("objm"), c.Uint64("objl"), oClass.Value())
+	oClass := c.Generic("objc").(*daos.OClassID)
+	oid := daos.ObjectIDInit((uint32)(c.Uint("objh")), c.Uint64("objm"), c.Uint64("objl"), *oClass)
 
 	oh, err := coh.ObjectOpen(oid, 0, daos.ObjOpenRW)
 	if err != nil {
@@ -243,5 +266,49 @@ func objAkeys(c *cli.Context) error {
 			fmt.Printf("%s\n", akeys[i])
 		}
 	}
+	return nil
+}
+
+func objFetch(c *cli.Context) error {
+	poh, err := openPool(c, daos.PoolConnectRW)
+	if err != nil {
+		return err
+	}
+	defer poh.Disconnect()
+
+	pm, err := OpenMeta(poh, c.String("pool"), false)
+	if err != nil {
+		return errors.Wrap(err, "open meta")
+	}
+	defer pm.Close()
+
+	coh, err := pm.OpenContainer(c.String("cont"), daos.ContOpenRW)
+	if err != nil {
+		return errors.Wrap(err, "open container failed")
+	}
+	defer coh.Close()
+
+	es, err := coh.EpochQuery()
+	if err != nil {
+		return errors.Wrap(err, "epoch query")
+	}
+
+	hce := es.GHCE()
+
+	oClass := c.Generic("objc").(*daos.OClassID)
+	oid := daos.ObjectIDInit((uint32)(c.Uint("objh")), c.Uint64("objm"), c.Uint64("objl"), *oClass)
+
+	log.Printf("object: %s", oid)
+	oh, err := coh.ObjectOpen(oid, hce, daos.ObjOpenRW)
+	if err != nil {
+		return errors.Wrap(err, "open object failed")
+	}
+	defer oh.Close()
+
+	value, err := oh.Get(hce, c.String("dkey"), c.String("akey"))
+	if err != nil {
+		return errors.Wrap(err, "get key")
+	}
+	fmt.Printf("%s/%s: %s\n", c.String("dkey"), c.String("akey"), value)
 	return nil
 }
