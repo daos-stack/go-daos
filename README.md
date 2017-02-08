@@ -41,13 +41,18 @@ directly. When dcmd calls orterun itself, the default uri file is
 /tmp/daos-uri or it can be customized with --uri option. See command
 help for more options and command details.
 
-This will create a single object and attempt to write and then read a
-value:
+Example comamnds to create an container and manipulate objects:
+
 
 	cont=$(uuidgen)
 	export DAOS_GROUP="" # if needed
 	export DAOS_POOL=$(dcmd pool create)
 	dcmd cont create --name mydb
-	dcmd object hello --cont mydb --value "world"
+	dcmd object update --cont mydb --dkey "a" --akey "1" --value "foo"
+	dcmd object update --cont mydb --dkey "a" --akey "2" --file /path/to/file
+	dcmd object fetch --cont mydb --dkey "a" --akey "1"
+	dcmd object fetch --cont mydb --dkey "a" --akey "2" --binary | sha1sum
 
+By default, `fetch` will display binary data in "hexdump -C"
+format. Use the --binary option to read the raw data.
 
