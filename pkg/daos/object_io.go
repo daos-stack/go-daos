@@ -121,6 +121,18 @@ type (
 	IODescriptorSlice []IODescriptor
 )
 
+// allocIOV allocates an array of iovs in C memory
+// return value must be released with C.free
+func allocIOV(nr int) *C.daos_iov_t {
+	return (*C.daos_iov_t)(C.calloc(C.size_t(nr), C.size_t(unsafe.Sizeof(C.daos_iov_t{}))))
+}
+
+// allocRecx allocates an array of recx in C memory
+// return value must be released with C.free
+func allocRecx(nr int) *C.daos_recx_t {
+	return (*C.daos_recx_t)(C.calloc(C.size_t(nr), C.size_t(unsafe.Sizeof(C.daos_recx_t{}))))
+}
+
 func InitIOD(kr []*KeyRequest) IODescriptorSlice {
 	iod := make(IODescriptorSlice, len(kr))
 
@@ -129,7 +141,7 @@ func InitIOD(kr []*KeyRequest) IODescriptorSlice {
 		iod[i].vd_name = ak.Native()
 		nr := len(req.Extents)
 		iod[i].vd_nr = C.uint(nr)
-		recxs := (*C.daos_recx_t)(C.calloc(C.size_t(unsafe.Sizeof(C.daos_recx_t{})), C.size_t(nr)))
+		recxs := allocRecx(nr)
 		reclist := (*[1 << 30]C.daos_recx_t)(unsafe.Pointer(recxs))[:nr:nr]
 		for j, ext := range req.Extents {
 			reclist[j].rx_rsize = C.uint64_t(ext.RecSize)
@@ -167,7 +179,7 @@ func InitSGUpdate(kr []*KeyRequest) SGListSlice {
 
 	for i, req := range kr {
 		nr := len(req.Buffers)
-		iovs := (*C.daos_iov_t)(C.calloc(C.size_t(unsafe.Sizeof(C.daos_iov_t{})), C.size_t(nr)))
+		iovs := allocIOV(nr)
 		iolist := (*[1 << 30]C.daos_iov_t)(unsafe.Pointer(iovs))[:nr:nr]
 		for j, buf := range req.Buffers {
 			copyToIov((*IoVec)(&iolist[j]), buf)
@@ -193,7 +205,7 @@ func InitSGFetch(kr []*KeyRequest) SGListSlice {
 
 	for i, req := range kr {
 		nr := len(req.Extents)
-		iovs := (*C.daos_iov_t)(C.calloc(C.size_t(unsafe.Sizeof(C.daos_iov_t{})), C.size_t(nr)))
+		iovs := allocIOV(nr)
 		iolist := (*[1 << 30]C.daos_iov_t)(unsafe.Pointer(iovs))[:nr:nr]
 		for j, extent := range req.Extents {
 			sz := extent.Count * extent.RecSize

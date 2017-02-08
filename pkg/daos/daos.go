@@ -6,10 +6,6 @@ package daos
 // #include <daos.h>
 // #include <daos/common.h>
 //
-//
-//daos_rank_t*  _alloc_ranks(uint32_t n) {
-//        return (daos_rank_t*) calloc(n, sizeof(daos_rank_t));
-//}
 import "C"
 
 import (
@@ -86,6 +82,12 @@ func str2uuid(s string) (*C.uchar, error) {
 	return (*C.uchar)(unsafe.Pointer(&id[0])), nil
 }
 
+// allocRecx allocates an array of  ranks in C memory
+// return value must be released with C.free
+func allocRanks(nr C.uint32_t) *C.daos_rank_t {
+	return (*C.daos_rank_t)(C.calloc(C.size_t(nr), C.size_t(unsafe.Sizeof(C.daos_rank_t(0)))))
+}
+
 // PoolCreate creates a new pool of specfied size.
 func PoolCreate(mode uint32, uid uint32, gid uint32, group string, size int64) (string, error) {
 	var cGroup *C.char
@@ -99,7 +101,7 @@ func PoolCreate(mode uint32, uid uint32, gid uint32, group string, size int64) (
 
 	nranks := C.uint32_t(13)
 	svc := &C.daos_rank_list_t{}
-	ranks := C._alloc_ranks(nranks)
+	ranks := allocRanks(nranks)
 	defer C.free(unsafe.Pointer(ranks))
 
 	svc.rl_nr.num = nranks
@@ -242,7 +244,7 @@ func (poh *PoolHandle) Exclude(targets []Rank) error {
 	var tgts C.daos_rank_list_t
 
 	tgts.rl_nr.num = C.uint32_t(len(targets))
-	tgts.rl_ranks = C._alloc_ranks(tgts.rl_nr.num)
+	tgts.rl_ranks = allocRanks(tgts.rl_nr.num)
 	defer C.free(unsafe.Pointer(tgts.rl_ranks))
 
 	ranks := (*[1 << 30]C.daos_rank_t)(unsafe.Pointer(tgts.rl_ranks))[:len(targets):len(targets)]
