@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"io/ioutil"
 	"log"
+	"os"
 
 	"github.com/daos-stack/go-daos/pkg/daos"
 	"github.com/pkg/errors"
@@ -66,6 +68,54 @@ func init() {
 					},
 				},
 			},
+
+			{
+				Name:      "declare",
+				Usage:     "Declare a new object)",
+				ArgsUsage: "[uuid [uuid...]]",
+				Action:    daosCommand(objDeclare),
+				Flags: []cli.Flag{
+					poolFlag,
+					groupFlag,
+					contFlag,
+					objLoFlag,
+					objMidFlag,
+					objHiFlag,
+					objClassFlag,
+				},
+			},
+			{
+				Name:      "update",
+				Usage:     "Declare a new object)",
+				ArgsUsage: "[uuid [uuid...]]",
+				Action:    daosCommand(objUpdate),
+				Flags: []cli.Flag{
+					poolFlag,
+					groupFlag,
+					contFlag,
+					objLoFlag,
+					objMidFlag,
+					objHiFlag,
+					objClassFlag,
+					cli.StringFlag{
+						Name:  "dkey",
+						Usage: "The dkey to set",
+					},
+					cli.StringFlag{
+						Name:  "akey",
+						Usage: "The akey to set",
+					},
+					cli.StringFlag{
+						Name:  "value",
+						Usage: "Value for object.",
+					},
+					cli.StringFlag{
+						Name:  "file, f",
+						Usage: "Input file.",
+					},
+				},
+			},
+
 			{
 				Name:      "fetch",
 				Usage:     "Fetch akey of an object)",
@@ -96,6 +146,10 @@ func init() {
 						Usage: "Print data as hex value (useful for binary data.",
 					},
 					cli.BoolFlag{
+						Name:  "binary, b",
+						Usage: "Write binary data",
+					},
+					cli.BoolFlag{
 						Name:  "verbose, v",
 						Usage: "Print chatty messages ",
 					},
@@ -105,6 +159,7 @@ func init() {
 	}
 	commands = append(commands, objCommands)
 }
+
 func objHello(c *cli.Context) error {
 	poh, err := openPool(c, daos.PoolConnectRW)
 	if err != nil {
@@ -283,6 +338,110 @@ func objAkeys(c *cli.Context) error {
 	return nil
 }
 
+func objDeclare(c *cli.Context) error {
+	poh, err := openPool(c, daos.PoolConnectRW)
+	if err != nil {
+		return errors.Wrap(err, "connect failed")
+	}
+	defer poh.Disconnect()
+
+	pm, err := OpenMeta(poh, c.String("pool"), false)
+	if err != nil {
+		return errors.Wrap(err, "open meta")
+	}
+	defer pm.Close()
+
+	coh, err := pm.OpenContainer(c.String("cont"), daos.ContOpenRW)
+	if err != nil {
+		return errors.Wrap(err, "open container failed")
+	}
+	defer coh.Close()
+
+	e, err := coh.EpochHold(0)
+	if err != nil {
+		return errors.Wrap(err, "epoch hold failed")
+	}
+
+	cb := coh.EpochDiscard
+	defer func() {
+		cb(e)
+	}()
+
+	oClass := c.Generic("objc").(*daos.OClassID)
+	oid := daos.ObjectIDInit((uint32)(c.Uint("objh")), c.Uint64("objm"), c.Uint64("objl"), *oClass)
+
+	err = coh.ObjectDeclare(oid, e, nil)
+	if err != nil {
+		return errors.Wrap(err, "obj declare failed")
+	}
+	fmt.Printf("Declared object %s in epoch %d\n", oid, e)
+
+	cb = coh.EpochCommit
+	return nil
+}
+
+func objUpdate(c *cli.Context) error {
+	poh, err := openPool(c, daos.PoolConnectRW)
+	if err != nil {
+		return errors.Wrap(err, "connect failed")
+	}
+	defer poh.Disconnect()
+
+	pm, err := OpenMeta(poh, c.String("pool"), false)
+	if err != nil {
+		return errors.Wrap(err, "open meta")
+	}
+	defer pm.Close()
+
+	coh, err := pm.OpenContainer(c.String("cont"), daos.ContOpenRW)
+	if err != nil {
+		return errors.Wrap(err, "open container failed")
+	}
+	defer coh.Close()
+
+	val := c.String("value")
+	var buf []byte
+	if val == "" {
+		in := c.String("file")
+		if in == "" {
+			return errors.New("Must specify --value  or --file")
+		}
+		buf, err = ioutil.ReadFile(in)
+		if err != nil {
+			return err
+		}
+	} else {
+		buf = []byte(val)
+	}
+
+	epoch, err := coh.EpochHold(0)
+	if err != nil {
+		return errors.Wrap(err, "epoch hold failed")
+	}
+
+	cb := coh.EpochDiscard
+	defer func() {
+		cb(epoch)
+	}()
+
+	oClass := c.Generic("objc").(*daos.OClassID)
+	oid := daos.ObjectIDInit((uint32)(c.Uint("objh")), c.Uint64("objm"), c.Uint64("objl"), *oClass)
+
+	oh, err := coh.ObjectOpen(oid, epoch, daos.ObjOpenRW)
+	if err != nil {
+		return errors.Wrap(err, "open object failed")
+	}
+	defer oh.Close()
+
+	err = oh.Put(epoch, c.String("dkey"), c.String("akey"), buf)
+	if err != nil {
+		return errors.Wrap(err, "update")
+	}
+	fmt.Printf("%d bytes, committed epoch %d\n", len(buf), epoch)
+	cb = coh.EpochCommit
+	return nil
+}
+
 func objFetch(c *cli.Context) error {
 	verbose := c.Bool("verbose")
 	poh, err := openPool(c, daos.PoolConnectRW)
@@ -332,6 +491,12 @@ func objFetch(c *cli.Context) error {
 		fmt.Printf("object: %s\n", oid)
 		fmt.Printf("%s/%s: ", c.String("dkey"), c.String("akey"))
 	}
+
+	if c.Bool("binary") {
+		os.Stdout.Write(value)
+		return nil
+	}
+
 	if c.Bool("hex") || bytes.ContainsRune(value, 0) {
 		if verbose {
 			fmt.Println()
