@@ -15,6 +15,11 @@ type (
 	Anchor             C.daos_hash_out_t
 )
 
+func (a Anchor) EOF() bool {
+	rc, _ := C.daos_hash_is_eof(a.Pointer())
+	return bool(rc)
+}
+
 func (oh ObjectHandle) DistKeys(e Epoch, anchor *Anchor) ([][]byte, error) {
 	if anchor == nil {
 		return nil, errors.New("anchor must not be null")
@@ -55,7 +60,7 @@ func (oh ObjectHandle) AttrKeys(e Epoch, dkey []byte, anchor *Anchor) ([][]byte,
 	defer sg.Free()
 
 	rc, err := C.daos_obj_list_akey(oh.H(), e.Native(), distKey.Pointer(), &nr, kd.Pointer(), sg.Pointer(), anchor.Pointer(), nil)
-	if err := rc2err("daos_obj_list_dkey", rc, err); err != nil {
+	if err := rc2err("daos_obj_list_akey", rc, err); err != nil {
 		return nil, err
 	}
 

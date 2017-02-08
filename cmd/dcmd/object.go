@@ -190,13 +190,10 @@ func objDkeys(c *cli.Context) error {
 	defer oh.Close()
 
 	var anchor daos.Anchor
-	for {
+	for !anchor.EOF() {
 		dkeys, err := oh.DistKeys(daos.EpochMax, &anchor)
 		if err != nil {
 			return err
-		}
-		if len(dkeys) == 0 {
-			break
 		}
 		for i := range dkeys {
 			fmt.Printf("%s\n", dkeys[i])
@@ -227,7 +224,7 @@ func objAkeys(c *cli.Context) error {
 	oClass := c.Generic("objc").(*objectClass)
 	oid := daos.ObjectIDInit((uint32)(c.Uint("objh")), c.Uint64("objm"), c.Uint64("objl"), oClass.Value())
 
-	oh, err := coh.ObjectOpen(oid, daos.EpochMax, daos.ObjOpenRW)
+	oh, err := coh.ObjectOpen(oid, 0, daos.ObjOpenRW)
 	if err != nil {
 		return errors.Wrap(err, "open object failed")
 	}
@@ -237,13 +234,10 @@ func objAkeys(c *cli.Context) error {
 
 	var anchor daos.Anchor
 
-	for {
-		akeys, err := oh.AttrKeys(daos.EpochMax, []byte(dkey), &anchor)
+	for !anchor.EOF() {
+		akeys, err := oh.AttrKeys(0, []byte(dkey), &anchor)
 		if err != nil {
 			return err
-		}
-		if len(akeys) == 0 {
-			break
 		}
 		for i := range akeys {
 			fmt.Printf("%s\n", akeys[i])
