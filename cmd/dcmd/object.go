@@ -47,6 +47,7 @@ func init() {
 					objMidFlag,
 					objHiFlag,
 					objClassFlag,
+					hexFlag,
 				},
 			},
 			{
@@ -62,10 +63,9 @@ func init() {
 					objMidFlag,
 					objHiFlag,
 					objClassFlag,
-					cli.StringFlag{
-						Name:  "dkey",
-						Usage: "List the akeys for this dkey",
-					},
+					objDkeyFlag,
+					objDkeybFlag,
+					hexFlag,
 				},
 			},
 
@@ -97,14 +97,10 @@ func init() {
 					objMidFlag,
 					objHiFlag,
 					objClassFlag,
-					cli.StringFlag{
-						Name:  "dkey",
-						Usage: "The dkey to set",
-					},
-					cli.StringFlag{
-						Name:  "akey",
-						Usage: "The akey to set",
-					},
+					objDkeyFlag,
+					objDkeybFlag,
+					objAkeyFlag,
+					objAkeybFlag,
 					cli.StringFlag{
 						Name:  "value",
 						Usage: "Value for object.",
@@ -129,21 +125,14 @@ func init() {
 					objMidFlag,
 					objHiFlag,
 					objClassFlag,
-					cli.StringFlag{
-						Name:  "dkey",
-						Usage: "The dkey to fetch from",
-					},
-					cli.StringFlag{
-						Name:  "akey",
-						Usage: "The akey to lookup",
-					},
+					objDkeyFlag,
+					objDkeybFlag,
+					objAkeyFlag,
+					objAkeybFlag,
+					hexFlag,
 					cli.IntFlag{
 						Name:  "epoch, e",
 						Usage: "Epoch to use to fetch data. Default is GHCE",
-					},
-					cli.BoolFlag{
-						Name:  "hex, x",
-						Usage: "Print data as hex value (useful for binary data.",
 					},
 					cli.BoolFlag{
 						Name:  "binary, b",
@@ -288,7 +277,11 @@ func objDkeys(c *cli.Context) error {
 			return err
 		}
 		for i := range dkeys {
-			fmt.Printf("%s\n", dkeys[i])
+			if c.Bool("hex") {
+				fmt.Printf("%s\n", hex.EncodeToString(dkeys[i]))
+			} else {
+				fmt.Printf("%s\n", dkeys[i])
+			}
 		}
 	}
 	return nil
@@ -322,17 +315,21 @@ func objAkeys(c *cli.Context) error {
 	}
 	defer oh.Close()
 
-	dkey := c.String("dkey")
+	dkey := getkey(c, "dkey")
 
 	var anchor daos.Anchor
 
 	for !anchor.EOF() {
-		akeys, err := oh.AttrKeys(0, []byte(dkey), &anchor)
+		akeys, err := oh.AttrKeys(0, dkey, &anchor)
 		if err != nil {
 			return err
 		}
 		for i := range akeys {
-			fmt.Printf("%s\n", akeys[i])
+			if c.Bool("hex") {
+				fmt.Printf("%s\n", hex.EncodeToString(akeys[i]))
+			} else {
+				fmt.Printf("%s\n", akeys[i])
+			}
 		}
 	}
 	return nil
@@ -378,6 +375,21 @@ func objDeclare(c *cli.Context) error {
 
 	cb = coh.EpochCommit
 	return nil
+}
+
+func getkey(c *cli.Context, name string) []byte {
+	k := c.String(name)
+	if k == "" {
+		k = c.String(name + "b")
+		if k != "" {
+			buf, err := hex.DecodeString(k)
+			if err != nil {
+				return buf[0:0]
+			}
+			return buf
+		}
+	}
+	return []byte(k)
 }
 
 func objUpdate(c *cli.Context) error {
@@ -433,7 +445,10 @@ func objUpdate(c *cli.Context) error {
 	}
 	defer oh.Close()
 
-	err = oh.Put(epoch, c.String("dkey"), c.String("akey"), buf)
+	dkey := getkey(c, "dkey")
+	akey := getkey(c, "akey")
+
+	err = oh.Putb(epoch, dkey, akey, buf)
 	if err != nil {
 		return errors.Wrap(err, "update")
 	}
@@ -481,7 +496,10 @@ func objFetch(c *cli.Context) error {
 	}
 	defer oh.Close()
 
-	value, err := oh.Get(epoch, c.String("dkey"), c.String("akey"))
+	dkey := getkey(c, "dkey")
+	akey := getkey(c, "akey")
+
+	value, err := oh.Getb(epoch, dkey, akey)
 	if err != nil {
 		return errors.Wrap(err, "get key")
 

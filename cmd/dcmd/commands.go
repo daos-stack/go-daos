@@ -35,6 +35,10 @@ var contFlag = cli.StringFlag{
 	Name:  "cont",
 	Usage: "UUID for the new container.",
 }
+var hexFlag = cli.BoolFlag{
+	Name:  "hex, x",
+	Usage: "Print data as hex value (useful for binary data.",
+}
 
 var objLoFlag = cli.Uint64Flag{
 	Name:  "objl",
@@ -58,4 +62,21 @@ var objClassFlag = cli.GenericFlag{
 	Name:  "objc",
 	Usage: "Object I/O class",
 	Value: &defaultOclass,
+}
+
+var objDkeyFlag = cli.StringFlag{
+	Name:  "dkey",
+	Usage: "The dkey to set",
+}
+var objDkeybFlag = cli.StringFlag{
+	Name:  "dkeyb",
+	Usage: "Hex encoded dkey (for binary keys)",
+}
+var objAkeyFlag = cli.StringFlag{
+	Name:  "akey",
+	Usage: "The akey to set",
+}
+var objAkeybFlag = cli.StringFlag{
+	Name:  "akeyb",
+	Usage: "Hex encoded akey (for binary keys)",
 }

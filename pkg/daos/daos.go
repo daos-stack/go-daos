@@ -769,10 +769,15 @@ func (ak *AttrKey) Native() C.daos_akey_t {
 
 // Put sets the first record of a-key to value, with record size is len(value).
 func (oh *ObjectHandle) Put(e Epoch, dkey string, akey string, value []byte) error {
-	kr := NewKeyRequest([]byte(akey))
+	return oh.Putb(e, []byte(dkey), []byte(akey), value)
+}
+
+// Putb sets the first record of a-key to value, with record size is len(value).
+func (oh *ObjectHandle) Putb(e Epoch, dkey []byte, akey []byte, value []byte) error {
+	kr := NewKeyRequest(akey)
 	kr.Put(0, 1, uint64(len(value)), value)
 
-	return oh.Update(e, []byte(dkey), []*KeyRequest{kr})
+	return oh.Update(e, dkey, []*KeyRequest{kr})
 }
 
 const (
@@ -782,10 +787,15 @@ const (
 
 // Get returns first record for a-key.
 func (oh *ObjectHandle) Get(e Epoch, dkey string, akey string) ([]byte, error) {
-	kr := NewKeyRequest([]byte(akey))
+	return oh.Getb(e, []byte(dkey), []byte(akey))
+}
+
+// Getb returns first record for a-key.
+func (oh *ObjectHandle) Getb(e Epoch, dkey []byte, akey []byte) ([]byte, error) {
+	kr := NewKeyRequest(akey)
 	kr.Get(0, 1, RecAny)
 
-	err := oh.Fetch(e, []byte(dkey), []*KeyRequest{kr})
+	err := oh.Fetch(e, dkey, []*KeyRequest{kr})
 	if err != nil {
 		return nil, err
 	}
