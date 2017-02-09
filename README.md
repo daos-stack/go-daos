@@ -56,3 +56,5 @@ Example comamnds to create an container and manipulate objects:
 By default, `fetch` will display binary data in "hexdump -C"
 format. Use the --binary option to read the raw data.
 
+N.B. `dcmd` does not include a trailing NUL in the string keys, and
+assumes existing keys do not have them, either.
