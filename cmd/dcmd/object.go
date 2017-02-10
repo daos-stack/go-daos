@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/daos-stack/go-daos/pkg/daos"
+	"github.com/daos-stack/go-daos/pkg/ufd"
 	"github.com/pkg/errors"
 
 	cli "gopkg.in/urfave/cli.v1"
@@ -150,20 +151,14 @@ func init() {
 }
 
 func objHello(c *cli.Context) error {
-	poh, err := openPool(c, daos.PoolConnectRW)
+	uh, err := ufd.Connect(c.String("group"), c.String("pool"))
 	if err != nil {
 		return errors.Wrap(err, "connect failed")
 	}
-	defer poh.Disconnect()
-
-	pm, err := OpenMeta(poh, c.String("pool"), false)
-	if err != nil {
-		return errors.Wrap(err, "open meta")
-	}
-	defer pm.Close()
+	defer uh.Close()
 
 	log.Printf("open container: %v", c.String("cont"))
-	coh, err := pm.OpenContainer(c.String("cont"), daos.ContOpenRW)
+	coh, err := uh.OpenContainer(c.String("cont"), daos.ContOpenRW)
 	if err != nil {
 		return errors.Wrap(err, "open container failed")
 	}
@@ -218,44 +213,14 @@ func objHello(c *cli.Context) error {
 	return nil
 }
 
-func openPool(c *cli.Context, flags uint) (*daos.PoolHandle, error) {
-	group := c.String("group")
-	pool := c.String("pool")
-	if pool == "" {
-		return nil, errors.New("no pool uuid provided")
-	}
-
-	poh, err := daos.PoolConnect(pool, group, flags)
-	if err != nil {
-		return nil, errors.Wrap(err, "connect failed")
-	}
-	return poh, nil
-}
-
-func objPut(c *cli.Context) error {
-	poh, err := openPool(c, daos.PoolConnectRW)
-	if err != nil {
-		return err
-	}
-	defer poh.Disconnect()
-	return nil
-
-}
-
 func objDkeys(c *cli.Context) error {
-	poh, err := openPool(c, daos.PoolConnectRW)
+	uh, err := ufd.Connect(c.String("group"), c.String("pool"))
 	if err != nil {
-		return err
+		return errors.Wrap(err, "connect failed")
 	}
-	defer poh.Disconnect()
+	defer uh.Close()
 
-	pm, err := OpenMeta(poh, c.String("pool"), false)
-	if err != nil {
-		return errors.Wrap(err, "open meta")
-	}
-	defer pm.Close()
-
-	coh, err := pm.OpenContainer(c.String("cont"), daos.ContOpenRW)
+	coh, err := uh.OpenContainer(c.String("cont"), daos.ContOpenRW)
 	if err != nil {
 		return errors.Wrap(err, "open container failed")
 	}
@@ -288,19 +253,13 @@ func objDkeys(c *cli.Context) error {
 }
 
 func objAkeys(c *cli.Context) error {
-	poh, err := openPool(c, daos.PoolConnectRW)
+	uh, err := ufd.Connect(c.String("group"), c.String("pool"))
 	if err != nil {
-		return err
+		return errors.Wrap(err, "connect failed")
 	}
-	defer poh.Disconnect()
+	defer uh.Close()
 
-	pm, err := OpenMeta(poh, c.String("pool"), false)
-	if err != nil {
-		return errors.Wrap(err, "open meta")
-	}
-	defer pm.Close()
-
-	coh, err := pm.OpenContainer(c.String("cont"), daos.ContOpenRW)
+	coh, err := uh.OpenContainer(c.String("cont"), daos.ContOpenRW)
 	if err != nil {
 		return errors.Wrap(err, "open container failed")
 	}
@@ -336,19 +295,13 @@ func objAkeys(c *cli.Context) error {
 }
 
 func objDeclare(c *cli.Context) error {
-	poh, err := openPool(c, daos.PoolConnectRW)
+	uh, err := ufd.Connect(c.String("group"), c.String("pool"))
 	if err != nil {
 		return errors.Wrap(err, "connect failed")
 	}
-	defer poh.Disconnect()
+	defer uh.Close()
 
-	pm, err := OpenMeta(poh, c.String("pool"), false)
-	if err != nil {
-		return errors.Wrap(err, "open meta")
-	}
-	defer pm.Close()
-
-	coh, err := pm.OpenContainer(c.String("cont"), daos.ContOpenRW)
+	coh, err := uh.OpenContainer(c.String("cont"), daos.ContOpenRW)
 	if err != nil {
 		return errors.Wrap(err, "open container failed")
 	}
@@ -393,19 +346,13 @@ func getkey(c *cli.Context, name string) []byte {
 }
 
 func objUpdate(c *cli.Context) error {
-	poh, err := openPool(c, daos.PoolConnectRW)
+	uh, err := ufd.Connect(c.String("group"), c.String("pool"))
 	if err != nil {
 		return errors.Wrap(err, "connect failed")
 	}
-	defer poh.Disconnect()
+	defer uh.Close()
 
-	pm, err := OpenMeta(poh, c.String("pool"), false)
-	if err != nil {
-		return errors.Wrap(err, "open meta")
-	}
-	defer pm.Close()
-
-	coh, err := pm.OpenContainer(c.String("cont"), daos.ContOpenRW)
+	coh, err := uh.OpenContainer(c.String("cont"), daos.ContOpenRW)
 	if err != nil {
 		return errors.Wrap(err, "open container failed")
 	}
@@ -459,19 +406,13 @@ func objUpdate(c *cli.Context) error {
 
 func objFetch(c *cli.Context) error {
 	verbose := c.Bool("verbose")
-	poh, err := openPool(c, daos.PoolConnectRW)
+	uh, err := ufd.Connect(c.String("group"), c.String("pool"))
 	if err != nil {
-		return err
+		return errors.Wrap(err, "connect failed")
 	}
-	defer poh.Disconnect()
+	defer uh.Close()
 
-	pm, err := OpenMeta(poh, c.String("pool"), false)
-	if err != nil {
-		return errors.Wrap(err, "open meta")
-	}
-	defer pm.Close()
-
-	coh, err := pm.OpenContainer(c.String("cont"), daos.ContOpenRW)
+	coh, err := uh.OpenContainer(c.String("cont"), daos.ContOpenRW)
 	if err != nil {
 		return errors.Wrap(err, "open container failed")
 	}

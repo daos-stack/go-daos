@@ -3,8 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/daos-stack/go-daos/pkg/daos"
-	"github.com/pborman/uuid"
+	"github.com/daos-stack/go-daos/pkg/ufd"
 	"github.com/pkg/errors"
 	cli "gopkg.in/urfave/cli.v1"
 )
@@ -66,51 +65,32 @@ func init() {
 }
 
 func contCreate(c *cli.Context) error {
-	poh, err := openPool(c, daos.PoolConnectRW)
+	uh, err := ufd.Connect(c.String("group"), c.String("pool"))
 	if err != nil {
-		return errors.Wrap(err, "open pool")
+		return errors.Wrap(err, "ufd connect")
 	}
-	defer poh.Disconnect()
+	defer uh.Close()
 
-	id := c.String("uuid")
-	if id == "" {
-		id = uuid.New()
-	}
-	err = poh.NewContainer(id)
+	err = uh.NewContainer(c.String("name"), c.String("uuid"))
 	if err != nil {
 		return errors.Wrap(err, "new container")
 	}
-	name := c.String("name")
-	if name != "" {
-		pm, err := OpenMeta(poh, c.String("pool"), true)
-		if err != nil {
-			return errors.Wrap(err, "open meta")
-		}
-		defer pm.Close()
-		err = pm.AddContainer(name, id)
-	}
-
 	return err
 }
 
 func contInfo(c *cli.Context) error {
-	poh, err := openPool(c, daos.PoolConnectRW)
-	if err != nil {
-		return errors.Wrap(err, "open pool")
-	}
-	defer poh.Disconnect()
-
 	name := c.String("name")
 	if name == "" {
 		return errors.New("specifiy container name")
 	}
 
-	pm, err := OpenMeta(poh, c.String("pool"), false)
+	uh, err := ufd.Connect(c.String("group"), c.String("pool"))
 	if err != nil {
-		return errors.Wrap(err, "open meta")
+		return errors.Wrap(err, "ufd connect")
 	}
-	defer pm.Close()
-	id, err := pm.LookupContainer(name)
+	defer uh.Close()
+
+	id, err := uh.LookupContainer(name)
 	if err != nil {
 		return errors.Wrap(err, "open mata")
 	}
@@ -142,5 +122,5 @@ func contInfo(c *cli.Context) error {
 }
 
 func contDestroy(c *cli.Context) error {
-	return nil
+	return errors.New("not implemented")
 }

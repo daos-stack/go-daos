@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/daos-stack/go-daos/pkg/daos"
+	"github.com/daos-stack/go-daos/pkg/ufd"
 
 	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
@@ -105,13 +106,13 @@ func poolCreate(c *cli.Context) error {
 		return errors.Wrap(err, "unable to create pool")
 	}
 
-	poh, err := daos.PoolConnect(uuid, group, daos.PoolConnectRW)
+	uh, err := ufd.Connect(group, uuid)
 	if err != nil {
 		return errors.Wrap(err, "connect failed")
 	}
-	defer poh.Disconnect()
+	defer uh.Close()
 
-	err = PoolMetaInit(poh, uuid)
+	err = uh.PoolMetaInit()
 	if err != nil {
 		return errors.Wrap(err, "pool meta init")
 	}
@@ -121,13 +122,13 @@ func poolCreate(c *cli.Context) error {
 }
 
 func poolInit(c *cli.Context) error {
-	poh, err := openPool(c, daos.PoolConnectRW)
+	uh, err := ufd.Connect(c.String("group"), c.String("pool"))
 	if err != nil {
 		return errors.Wrap(err, "connect failed")
 	}
-	defer poh.Disconnect()
+	defer uh.Close()
 
-	err = PoolMetaInit(poh, c.String("pool"))
+	err = uh.PoolMetaInit()
 	if err != nil {
 		return errors.Wrap(err, "pool meta init")
 	}
@@ -135,27 +136,29 @@ func poolInit(c *cli.Context) error {
 }
 
 func poolInfo(c *cli.Context) error {
-	poh, err := openPool(c, daos.PoolConnectRW)
-	if err != nil {
-		return errors.Wrap(err, "connect failed")
-	}
-	defer poh.Disconnect()
+	uh, err := ufd.Connect(c.String("group"), c.String("pool"))
+	defer uh.Close()
 
-	info, err := poh.Info()
+	info, err := uh.Info()
 	if err != nil {
 		return errors.Wrap(err, "query failed")
 	}
-	pm, err := OpenMeta(poh, c.String("pool"), false)
-	defer pm.Close()
-	creator, err := pm.Creator()
+
+	meta, err := uh.Meta()
+	if err != nil {
+		return errors.Wrap(err, "query failed")
+	}
+	defer meta.Close()
+
+	creator, err := meta.Creator()
 	if err != nil {
 		return err
 	}
-	created, err := pm.Created()
+	created, err := meta.Created()
 	if err != nil {
 		return err
 	}
-	conttab, err := pm.ContTable()
+	conttab, err := meta.ContTable()
 	if err != nil {
 		return err
 	}

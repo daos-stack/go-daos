@@ -144,6 +144,7 @@ func PoolDestroy(pool string, group string, force int) error {
 	rc, err := C.daos_pool_destroy(uuid, cGroup, C.int(force), nil)
 	return rc2err("daos_pool_destroy", rc, err)
 }
+
 func (info *PoolInfo) UUID() string {
 	if info == nil {
 		return ""
