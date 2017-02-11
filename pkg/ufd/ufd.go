@@ -44,8 +44,8 @@ type (
 )
 
 const (
-	Readonly  = OpenFlag(iota)
-	ReadWrite = OpenFlag(iota)
+	Readonly  OpenFlag = iota
+	ReadWrite          = iota
 )
 
 const (

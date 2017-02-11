@@ -61,6 +61,24 @@ func (oh *ObjectHandle) Update(e Epoch, dkey []byte, request []*KeyRequest) erro
 	return rc2err("daos_obj_update", rc, err)
 }
 
+// Inspect attempts to fetch the record size for each akey provided in the
+// KeyRequest Buffers.  No data will be fetched, but the updated
+func (oh *ObjectHandle) Inspect(e Epoch, dkey []byte, request []*KeyRequest) error {
+	distKey := ByteToDistKey(dkey)
+	defer distKey.Free()
+
+	iods := InitIOD(request)
+	defer iods.Free()
+
+	rc, err := C.daos_obj_fetch(oh.H(), e.Native(), distKey.Pointer(), C.uint(len(request)), iods.Pointer(), nil, nil, nil)
+	if err := rc2err("daos_obj_fetch", rc, err); err != nil {
+		return err
+	}
+
+	CopyIOD(request, iods)
+	return nil
+}
+
 // Fetch reads the specified extents and returns them in newly allocated
 // KeyRequest Buffers. If any extents have a RecSize set to RecAny, then
 // a second fetch will done iff all the extents have a valid record size after
@@ -80,12 +98,12 @@ func (oh *ObjectHandle) Fetch(e Epoch, dkey []byte, request []*KeyRequest) error
 		preFetch = true
 	}
 
-	//log.Printf("KR: %#v", request)
+	//log.Printf("KR: %#v", *request[0])
 	//log.Printf("iov: %#v\nsg: %#v", iods.Pointer(), sgls.Pointer())
 	//log.Printf("rex: %#v", iods[0].vd_recxs)
 
 	rc, err := C.daos_obj_fetch(oh.H(), e.Native(), distKey.Pointer(), C.uint(len(request)), iods.Pointer(), sgls.Pointer(), nil, nil)
-	if err := rc2err("daos_obj_update", rc, err); err != nil {
+	if err := rc2err("daos_obj_fetch", rc, err); err != nil {
 		return err
 	}
 

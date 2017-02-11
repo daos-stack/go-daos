@@ -69,6 +69,30 @@ func init() {
 					hexFlag,
 				},
 			},
+			{
+				Name:      "inspect",
+				Usage:     "List keys of an object (currently same object created by hello)",
+				ArgsUsage: "[uuid [uuid...]]",
+				Action:    daosCommand(objInspect),
+				Flags: []cli.Flag{
+					poolFlag,
+					groupFlag,
+					contFlag,
+					objLoFlag,
+					objMidFlag,
+					objHiFlag,
+					objClassFlag,
+					objDkeyFlag,
+					objDkeybFlag,
+					objAkeyFlag,
+					objAkeybFlag,
+					hexFlag,
+					cli.BoolFlag{
+						Name:  "size, s",
+						Usage: "Print record size for each akey",
+					},
+				},
+			},
 
 			{
 				Name:      "declare",
@@ -213,6 +237,20 @@ func objHello(c *cli.Context) error {
 	return nil
 }
 
+func fetchDkeys(oh *daos.ObjectHandle, epoch daos.Epoch) ([][]byte, error) {
+	var dkeys [][]byte
+	var anchor daos.Anchor
+	for !anchor.EOF() {
+		result, err := oh.DistKeys(epoch, &anchor)
+		if err != nil {
+			return nil, err
+		}
+		dkeys = append(dkeys, result...)
+	}
+	return dkeys, nil
+
+}
+
 func objDkeys(c *cli.Context) error {
 	uh, err := ufd.Connect(c.String("group"), c.String("pool"))
 	if err != nil {
@@ -226,8 +264,7 @@ func objDkeys(c *cli.Context) error {
 	}
 	defer coh.Close()
 
-	oClass := c.Generic("objc").(*daos.OClassID)
-	oid := daos.ObjectIDInit((uint32)(c.Uint("objh")), c.Uint64("objm"), c.Uint64("objl"), *oClass)
+	oid := getoid(c)
 	log.Printf("oid: %s", oid)
 	oh, err := coh.ObjectOpen(oid, daos.EpochMax, daos.ObjOpenRW)
 	if err != nil {
@@ -235,21 +272,32 @@ func objDkeys(c *cli.Context) error {
 	}
 	defer oh.Close()
 
-	var anchor daos.Anchor
-	for !anchor.EOF() {
-		dkeys, err := oh.DistKeys(daos.EpochMax, &anchor)
-		if err != nil {
-			return err
-		}
-		for i := range dkeys {
-			if c.Bool("hex") {
-				fmt.Printf("%s\n", hex.EncodeToString(dkeys[i]))
-			} else {
-				fmt.Printf("%s\n", dkeys[i])
-			}
+	dkeys, err := fetchDkeys(oh, daos.EpochMax)
+	if err != nil {
+		return err
+	}
+	for i := range dkeys {
+		if c.Bool("hex") {
+			fmt.Printf("%s\n", hex.EncodeToString(dkeys[i]))
+		} else {
+			fmt.Printf("%s\n", dkeys[i])
 		}
 	}
 	return nil
+}
+
+func fetchAkeys(oh *daos.ObjectHandle, epoch daos.Epoch, dkey []byte) ([][]byte, error) {
+	var keys [][]byte
+	var anchor daos.Anchor
+	for !anchor.EOF() {
+		result, err := oh.AttrKeys(epoch, dkey, &anchor)
+		if err != nil {
+			return nil, err
+		}
+		keys = append(keys, result...)
+	}
+	return keys, nil
+
 }
 
 func objAkeys(c *cli.Context) error {
@@ -265,8 +313,7 @@ func objAkeys(c *cli.Context) error {
 	}
 	defer coh.Close()
 
-	oClass := c.Generic("objc").(*daos.OClassID)
-	oid := daos.ObjectIDInit((uint32)(c.Uint("objh")), c.Uint64("objm"), c.Uint64("objl"), *oClass)
+	oid := getoid(c)
 
 	oh, err := coh.ObjectOpen(oid, 0, daos.ObjOpenRW)
 	if err != nil {
@@ -276,19 +323,15 @@ func objAkeys(c *cli.Context) error {
 
 	dkey := getkey(c, "dkey")
 
-	var anchor daos.Anchor
-
-	for !anchor.EOF() {
-		akeys, err := oh.AttrKeys(0, dkey, &anchor)
-		if err != nil {
-			return err
-		}
-		for i := range akeys {
-			if c.Bool("hex") {
-				fmt.Printf("%s\n", hex.EncodeToString(akeys[i]))
-			} else {
-				fmt.Printf("%s\n", akeys[i])
-			}
+	akeys, err := fetchAkeys(oh, 0, dkey)
+	if err != nil {
+		return err
+	}
+	for i := range akeys {
+		if c.Bool("hex") {
+			fmt.Printf("%s\n", hex.EncodeToString(akeys[i]))
+		} else {
+			fmt.Printf("%s\n", akeys[i])
 		}
 	}
 	return nil
@@ -317,8 +360,7 @@ func objDeclare(c *cli.Context) error {
 		cb(e)
 	}()
 
-	oClass := c.Generic("objc").(*daos.OClassID)
-	oid := daos.ObjectIDInit((uint32)(c.Uint("objh")), c.Uint64("objm"), c.Uint64("objl"), *oClass)
+	oid := getoid(c)
 
 	err = coh.ObjectDeclare(oid, e, nil)
 	if err != nil {
@@ -328,6 +370,12 @@ func objDeclare(c *cli.Context) error {
 
 	cb = coh.EpochCommit
 	return nil
+}
+
+func getoid(c *cli.Context) *daos.ObjectID {
+	oClass := c.Generic("objc").(*daos.OClassID)
+	oid := daos.ObjectIDInit((uint32)(c.Uint("objh")), c.Uint64("objm"), c.Uint64("objl"), *oClass)
+	return oid
 }
 
 func getkey(c *cli.Context, name string) []byte {
@@ -383,8 +431,7 @@ func objUpdate(c *cli.Context) error {
 		cb(epoch)
 	}()
 
-	oClass := c.Generic("objc").(*daos.OClassID)
-	oid := daos.ObjectIDInit((uint32)(c.Uint("objh")), c.Uint64("objm"), c.Uint64("objl"), *oClass)
+	oid := getoid(c)
 
 	oh, err := coh.ObjectOpen(oid, epoch, daos.ObjOpenRW)
 	if err != nil {
@@ -428,8 +475,7 @@ func objFetch(c *cli.Context) error {
 		epoch = es.GHCE()
 	}
 
-	oClass := c.Generic("objc").(*daos.OClassID)
-	oid := daos.ObjectIDInit((uint32)(c.Uint("objh")), c.Uint64("objm"), c.Uint64("objl"), *oClass)
+	oid := getoid(c)
 
 	oh, err := coh.ObjectOpen(oid, epoch, daos.ObjOpenRW)
 	if err != nil {
@@ -465,4 +511,86 @@ func objFetch(c *cli.Context) error {
 		fmt.Printf("%s\n", value)
 	}
 	return nil
+}
+
+func objInspect(c *cli.Context) error {
+	uh, err := ufd.Connect(c.String("group"), c.String("pool"))
+	if err != nil {
+		return errors.Wrap(err, "connect failed")
+	}
+	defer uh.Close()
+
+	coh, err := uh.OpenContainer(c.String("cont"), daos.ContOpenRW)
+	if err != nil {
+		return errors.Wrap(err, "open container failed")
+	}
+	defer coh.Close()
+
+	//verbose := c.Bool("verbose")
+	oid := getoid(c)
+
+	oh, err := coh.ObjectOpen(oid, daos.EpochMax, daos.ObjOpenRW)
+	if err != nil {
+		return errors.Wrap(err, "open object failed")
+	}
+	defer oh.Close()
+
+	dkeyArg := getkey(c, "dkey")
+	akeyArg := getkey(c, "akey")
+	epoch := daos.EpochMax
+
+	var dkeys [][]byte
+	if len(dkeyArg) == 0 {
+		dkeys, err = fetchDkeys(oh, epoch)
+		if err != nil {
+			return err
+		}
+	} else {
+		dkeys = [][]byte{dkeyArg}
+	}
+
+	for _, dkey := range dkeys {
+		var akeys [][]byte
+		if len(akeyArg) == 0 {
+			akeys, err = fetchAkeys(oh, epoch, dkey)
+			if err != nil {
+				return err
+			}
+		} else {
+			akeys = [][]byte{akeyArg}
+		}
+
+		for _, akey := range akeys {
+			recSize, err := inspectKey(oh, epoch, dkey, akey)
+			if err != nil {
+				return errors.Wrap(err, "inspectkey")
+			}
+			if recSize == 0 {
+				continue
+			}
+			if c.Bool("hex") {
+				fmt.Printf("%s/%s", hex.EncodeToString(dkey), hex.EncodeToString(akey))
+			} else {
+				fmt.Printf("%s/%s", dkey, akey)
+			}
+			if c.Bool("size") {
+				fmt.Printf(" %d\n", recSize)
+			} else {
+				fmt.Println()
+			}
+
+		}
+	}
+	return nil
+}
+
+func inspectKey(oh *daos.ObjectHandle, epoch daos.Epoch, dkey, akey []byte) (uint64, error) {
+	kr := daos.NewKeyRequest(akey)
+	kr.Get(0, 1, daos.RecAny)
+
+	err := oh.Inspect(epoch, dkey, []*daos.KeyRequest{kr})
+	if err != nil {
+		return 0, errors.Wrap(err, "Inspect")
+	}
+	return kr.Extents[0].RecSize, nil
 }
