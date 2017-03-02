@@ -91,6 +91,10 @@ func init() {
 						Name:  "size, s",
 						Usage: "Print record size for each akey",
 					},
+					cli.BoolFlag{
+						Name:  "value",
+						Usage: "Print chatty messages ",
+					},
 				},
 			},
 
@@ -526,7 +530,7 @@ func objInspect(c *cli.Context) error {
 	}
 	defer coh.Close()
 
-	//verbose := c.Bool("verbose")
+	verbose := c.Bool("verbose")
 	oid := getoid(c)
 
 	oh, err := coh.ObjectOpen(oid, daos.EpochMax, daos.ObjOpenRW)
@@ -574,7 +578,24 @@ func objInspect(c *cli.Context) error {
 				fmt.Printf("%s/%s", dkey, akey)
 			}
 			if c.Bool("size") {
-				fmt.Printf(" %d\n", recSize)
+				fmt.Printf(" %d", recSize)
+			}
+
+			if c.Bool("value") {
+				value, err := oh.Getb(epoch, dkey, akey)
+				if err != nil {
+					return errors.Wrap(err, "get key")
+
+				}
+
+				if c.Bool("hex") || bytes.ContainsRune(value, 0) {
+					if verbose {
+						fmt.Println()
+					}
+					fmt.Print("\n" + hex.Dump(value))
+				} else {
+					fmt.Printf(": %s\n", value)
+				}
 			} else {
 				fmt.Println()
 			}

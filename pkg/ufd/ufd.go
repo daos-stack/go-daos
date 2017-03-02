@@ -7,7 +7,6 @@ package ufd
 
 import (
 	"encoding/json"
-	"log"
 	"os/user"
 	"time"
 
@@ -209,7 +208,7 @@ func (h *Handle) LookupContainer(name string) (string, error) {
 func (pm *Handle) OpenContainer(cont string, flags int) (*daos.ContHandle, error) {
 	id, err := pm.LookupContainer(cont)
 	if err != nil {
-		log.Printf("%s: lookup failed, assuming uuid", cont)
+		//log.Printf("%s: lookup failed, assuming uuid", cont)
 		id = cont
 	}
 
