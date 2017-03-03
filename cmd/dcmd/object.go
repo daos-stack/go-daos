@@ -44,10 +44,7 @@ func init() {
 					poolFlag,
 					groupFlag,
 					contFlag,
-					objLoFlag,
-					objMidFlag,
-					objHiFlag,
-					objClassFlag,
+					objFlag,
 					hexFlag,
 				},
 			},
@@ -60,10 +57,7 @@ func init() {
 					poolFlag,
 					groupFlag,
 					contFlag,
-					objLoFlag,
-					objMidFlag,
-					objHiFlag,
-					objClassFlag,
+					objFlag,
 					objDkeyFlag,
 					objDkeybFlag,
 					hexFlag,
@@ -78,10 +72,7 @@ func init() {
 					poolFlag,
 					groupFlag,
 					contFlag,
-					objLoFlag,
-					objMidFlag,
-					objHiFlag,
-					objClassFlag,
+					objFlag,
 					objDkeyFlag,
 					objDkeybFlag,
 					objAkeyFlag,
@@ -107,10 +98,7 @@ func init() {
 					poolFlag,
 					groupFlag,
 					contFlag,
-					objLoFlag,
-					objMidFlag,
-					objHiFlag,
-					objClassFlag,
+					objFlag,
 				},
 			},
 			{
@@ -122,10 +110,7 @@ func init() {
 					poolFlag,
 					groupFlag,
 					contFlag,
-					objLoFlag,
-					objMidFlag,
-					objHiFlag,
-					objClassFlag,
+					objFlag,
 					objDkeyFlag,
 					objDkeybFlag,
 					objAkeyFlag,
@@ -147,13 +132,11 @@ func init() {
 				ArgsUsage: "[uuid [uuid...]]",
 				Action:    daosCommand(objFetch),
 				Flags: []cli.Flag{
+					verboseFlag,
 					poolFlag,
 					groupFlag,
 					contFlag,
-					objLoFlag,
-					objMidFlag,
-					objHiFlag,
-					objClassFlag,
+					objFlag,
 					objDkeyFlag,
 					objDkeybFlag,
 					objAkeyFlag,
@@ -166,10 +149,6 @@ func init() {
 					cli.BoolFlag{
 						Name:  "binary, b",
 						Usage: "Write binary data",
-					},
-					cli.BoolFlag{
-						Name:  "verbose, v",
-						Usage: "Print chatty messages ",
 					},
 				},
 			},
@@ -252,7 +231,6 @@ func fetchDkeys(oh *daos.ObjectHandle, epoch daos.Epoch) ([][]byte, error) {
 		dkeys = append(dkeys, result...)
 	}
 	return dkeys, nil
-
 }
 
 func objDkeys(c *cli.Context) error {
@@ -377,9 +355,7 @@ func objDeclare(c *cli.Context) error {
 }
 
 func getoid(c *cli.Context) *daos.ObjectID {
-	oClass := c.Generic("objc").(*daos.OClassID)
-	oid := daos.ObjectIDInit((uint32)(c.Uint("objh")), c.Uint64("objm"), c.Uint64("objl"), *oClass)
-	return oid
+	return c.Generic("obj").(*daos.ObjectID)
 }
 
 func getkey(c *cli.Context, name string) []byte {
@@ -530,9 +506,10 @@ func objInspect(c *cli.Context) error {
 	}
 	defer coh.Close()
 
-	verbose := c.Bool("verbose")
 	oid := getoid(c)
+	log.Print(oid)
 
+	verbose := c.Bool("verbose")
 	oh, err := coh.ObjectOpen(oid, daos.EpochMax, daos.ObjOpenRW)
 	if err != nil {
 		return errors.Wrap(err, "open object failed")

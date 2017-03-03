@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"strconv"
 	"strings"
 	"unsafe"
 
@@ -561,16 +562,59 @@ func (o *ObjectID) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-func ParseOID(s string) (*ObjectID, error) {
-	var o ObjectID
-	n, err := fmt.Sscanf(s, "0x%x.0x%x.0x%x", &o.hi, &o.mid, &o.lo)
+func (o *ObjectID) Set(value string) error {
+	oid, err := ParseOID(value)
 	if err != nil {
-		return nil, errors.Wrap(err, "scan oid")
+		return err
 	}
-	if n != 3 {
-		return nil, errors.Errorf("unable to parse string %v", s)
+	*o = *oid
+	return nil
+}
+
+func ParseOID(s string) (*ObjectID, error) {
+	var oc OClassID
+	var hi uint32
+	var mid, lo uint64
+
+	i := strings.Index(s, ":")
+	if i >= 0 {
+		c := s[0:i]
+		err := oc.Set(c)
+		if err != nil {
+			return nil, errors.Wrap(err, "invalid class")
+		}
+		s = s[i+1 : len(s)]
 	}
-	return &o, nil
+	parts := strings.Split(s, ".")
+	if len(parts) == 3 {
+		tmp, err := strconv.ParseUint(parts[0], 0, 64)
+		if err != nil {
+			return nil, errors.Wrap(err, "hi")
+		}
+		oc = OClassID(tmp >> 32)
+		hi = uint32(tmp & 0x00000000ffffffff)
+		parts = parts[1:len(parts)]
+	}
+	if len(parts) == 2 {
+		tmp, err := strconv.ParseUint(parts[0], 0, 64)
+		if err != nil {
+			return nil, errors.Wrap(err, "mid")
+		}
+		mid = tmp
+		parts = parts[1:len(parts)]
+	}
+	if len(parts) == 1 {
+		tmp, err := strconv.ParseUint(parts[0], 0, 64)
+		if err != nil {
+			return nil, errors.Wrap(err, "lo")
+		}
+		lo = tmp
+	}
+
+	if oc == 0 {
+		oc = ClassLargeRW
+	}
+	return ObjectIDInit(hi, mid, lo, oc), nil
 }
 
 func (c OClassID) Native() C.daos_oclass_id_t {
