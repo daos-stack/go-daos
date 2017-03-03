@@ -550,6 +550,24 @@ func (o *ObjectID) Pointer() *C.daos_obj_id_t {
 	return (*C.daos_obj_id_t)(o)
 }
 
+func (o *ObjectID) Hi() uint32 {
+	// top half of .hi is reserved
+	return uint32(o.hi)
+}
+
+func (o *ObjectID) Mid() uint64 {
+	return uint64(o.mid)
+}
+
+func (o *ObjectID) Lo() uint64 {
+	return uint64(o.lo)
+}
+
+func (o *ObjectID) Class() OClassID {
+	c := C.daos_obj_id2class(o.Native())
+	return OClassID(c)
+}
+
 func (o *ObjectID) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + o.String() + `"`), nil
 }
@@ -692,11 +710,6 @@ func ObjectIDInit(hi uint32, mid, lo uint64, class OClassID) *ObjectID {
 
 	C.daos_obj_id_generate(oid.Pointer(), class.Native())
 	return &oid
-}
-
-func ObjectToClass(oid *ObjectID) OClassID {
-	c := C.daos_obj_id2class(oid.Native())
-	return OClassID(c)
 }
 
 func (oa *ObjectAttribute) Pointer() *C.daos_obj_attr_t {
