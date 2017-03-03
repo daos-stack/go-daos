@@ -32,6 +32,17 @@ func init() {
 				},
 			},
 			{
+				Name:      "list",
+				Usage:     "List containers",
+				ArgsUsage: "[uuid [uuid...]]",
+				Action:    daosCommand(contList),
+				Flags: []cli.Flag{
+					poolFlag,
+					groupFlag,
+					verboseFlag,
+				},
+			},
+			{
 				Name:      "info",
 				Usage:     "Display info about container",
 				ArgsUsage: "",
@@ -76,6 +87,24 @@ func contCreate(c *cli.Context) error {
 		return errors.Wrap(err, "new container")
 	}
 	return err
+}
+
+func contList(c *cli.Context) error {
+	uh, err := ufd.Connect(c.String("group"), c.String("pool"))
+	if err != nil {
+		return errors.Wrap(err, "ufd connect")
+	}
+	defer uh.Close()
+
+	conts, err := uh.List()
+	if err != nil {
+		return errors.Wrap(err, "List container")
+	}
+
+	for _, c := range conts {
+		fmt.Println(string(c))
+	}
+	return nil
 }
 
 func contInfo(c *cli.Context) error {

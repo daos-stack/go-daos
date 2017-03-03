@@ -144,6 +144,13 @@ func (h *Handle) PoolMetaInit() error {
 		return errors.Wrap(err, "put cont oid")
 	}
 
+	pm, err := h.openMeta(ReadWrite)
+	if err != nil {
+		return errors.Wrap(err, "openMeta")
+	}
+	defer pm.Close()
+	err = pm.AddContainer("pool_meta", h.uuid)
+
 	commit = coh.EpochCommit
 	return nil
 }
@@ -181,6 +188,30 @@ func (h *Handle) NewContainer(name string, id string) error {
 
 	err = m.AddContainer(name, id)
 	return err
+}
+
+func (h *Handle) List() ([][]byte, error) {
+	pm, err := h.openMeta(Readonly)
+	if err != nil {
+		return nil, errors.Wrap(err, "openMeta")
+	}
+	defer pm.Close()
+	oh, err := pm.OpenContTable()
+	if err != nil {
+		return nil, err
+	}
+	defer oh.Close()
+	var dkeys [][]byte
+	var anchor daos.Anchor
+	for !anchor.EOF() {
+		result, err := oh.DistKeys(daos.EpochMax, &anchor)
+		if err != nil {
+			return nil, err
+		}
+		dkeys = append(dkeys, result...)
+	}
+	return dkeys, nil
+
 }
 
 // LookupContainer returns the uuid of the named container.
