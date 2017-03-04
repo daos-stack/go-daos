@@ -57,6 +57,18 @@ func Fini() {
 	C.daos_fini()
 }
 
+// Handle is an interface for DAOS handle types
+type Handle interface {
+	Pointer() *C.daos_handle_t
+	H() C.daos_handle_t
+}
+
+// HandleIsInvalid returns a boolean indicating whether or not the
+// handle is invalid.
+func HandleIsInvalid(h Handle) bool {
+	return bool(C.daos_handle_is_inval(h.H()))
+}
+
 // Returns an failure if rc != 0. If err is already set
 // then it is wrapped, otherwise it is ignored.
 func rc2err(label string, rc C.int, err error) error {
