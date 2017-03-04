@@ -61,6 +61,7 @@ func Fini() {
 type Handle interface {
 	Pointer() *C.daos_handle_t
 	H() C.daos_handle_t
+	Zero()
 }
 
 // HandleIsInvalid returns a boolean indicating whether or not the
@@ -236,9 +237,15 @@ func (poh *PoolHandle) Pointer() *C.daos_handle_t {
 	return (*C.daos_handle_t)(poh)
 }
 
+// Zero resets the handle to the invalid state
+func (poh *PoolHandle) Zero() {
+	poh.Pointer().cookie = 0
+}
+
 // Disconnect closes the pool handle.
 func (poh *PoolHandle) Disconnect() error {
 	rc, err := C.daos_pool_disconnect(poh.H(), nil)
+	poh.Zero()
 	return rc2err("daos_pool_disconnect", rc, err)
 }
 
@@ -301,6 +308,11 @@ func (coh *ContHandle) Pointer() *C.daos_handle_t {
 	return (*C.daos_handle_t)(coh)
 }
 
+// Zero resets the handle to the invalid state
+func (coh *ContHandle) Zero() {
+	coh.Pointer().cookie = 0
+}
+
 // Open a the container identified by the UUID
 func (poh *PoolHandle) Open(uuid string, flags int) (*ContHandle, error) {
 	cuuid, err := str2uuid(uuid)
@@ -332,6 +344,8 @@ func (coh *ContHandle) Destroy(uuid string, force bool) error {
 	if err := rc2err("daos_cont_destroy", rc, err); err != nil {
 		return err
 	}
+
+	coh.Zero()
 	return nil
 }
 
@@ -736,6 +750,11 @@ func (oh *ObjectHandle) Pointer() *C.daos_handle_t {
 	return (*C.daos_handle_t)(oh)
 }
 
+// Zero resets the handle to the invalid state
+func (oh *ObjectHandle) Zero() {
+	oh.Pointer().cookie = 0
+}
+
 func (coh *ContHandle) ObjectDeclare(oid *ObjectID, e Epoch, oa *ObjectAttribute) error {
 	rc, err := C.daos_obj_declare(coh.H(), oid.Native(), e.Native(), oa.Pointer(), nil)
 	return rc2err("daos_obj_declare", rc, err)
@@ -762,6 +781,7 @@ func (coh *ContHandle) ObjectOpen(oid *ObjectID, e Epoch, mode ObjectOpenFlag) (
 
 func (oh *ObjectHandle) Close() error {
 	rc, err := C.daos_obj_close(oh.H(), nil)
+	oh.Zero()
 	return rc2err("daos_obj_close", rc, err)
 }
 
