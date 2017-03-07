@@ -5,6 +5,8 @@ import (
 	"log"
 	"os"
 
+	"github.com/daos-stack/go-daos/pkg/orterun"
+
 	cli "gopkg.in/urfave/cli.v1"
 )
 
@@ -35,12 +37,12 @@ func myMain() int {
 		cli.StringFlag{
 			Name:  "uri",
 			Usage: "Path to URI file for daos_server",
-			Value: defaultURI,
+			Value: orterun.DefaultURI,
 		},
 		cli.StringFlag{
 			Name:  "runner",
 			Usage: "path to MPI driver cmpatible with DAOS",
-			Value: defaultRunner,
+			Value: orterun.DefaultRunner,
 		},
 		// cli.BoolFlag{
 		// 	Name:  "debug",
@@ -66,7 +68,7 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	if _, ok := os.LookupEnv("PMIX_RANK"); !ok {
-		relaunch()
+		orterun.Relaunch()
 	}
 
 	os.Exit(myMain())

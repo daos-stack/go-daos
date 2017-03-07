@@ -1,4 +1,4 @@
-package main
+package orterun
 
 import (
 	"flag"
@@ -10,13 +10,15 @@ import (
 	"syscall"
 )
 
-var defaultRunner = "orterun"
-var defaultURI = "/tmp/daos-uri"
+var DefaultRunner = "orterun"
+var DefaultURI = "/tmp/daos-uri"
 
-func relaunch() {
+func Relaunch() {
 	np := flag.Int("np", 1, "number of threads processes to run")
-	uri := flag.String("uri", defaultURI, "path to URI file")
-	runner := flag.String("runner", defaultRunner, "mpi runner")
+	uri := flag.String("uri", DefaultURI, "path to URI file")
+	runner := flag.String("runner", DefaultRunner, "mpi runner")
+	// TODO: Figure out some ju-ju to pass through flags
+	_ = flag.Bool("debug", false, "print debugging messages.")
 	flag.Parse()
 
 	prog, err := exec.LookPath(*runner)
