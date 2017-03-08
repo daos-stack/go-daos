@@ -61,7 +61,11 @@ func Fini() {
 // then it is wrapped, otherwise it is ignored.
 func rc2err(label string, rc C.int, err error) error {
 	if rc != 0 {
-		return errors.Errorf("%s: %d", label, rc)
+		if rc < 0 {
+			rc = -rc
+		}
+		e := Error(rc)
+		return errors.Errorf("%s: %s", label, e)
 	}
 	return nil
 }
