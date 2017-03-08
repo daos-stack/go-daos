@@ -25,20 +25,23 @@ type (
 	// Meta provides additional information about the managed pool.
 	Meta interface {
 		Close() error
-		Creator() (string, error)
-		Created() (time.Time, error)
-		ContTable() (*daos.ObjectID, error)
+		Creator() string
+		Created() time.Time
+		ContTable() *daos.ObjectID
 	}
 
 	// OpenFlag indicates if open is Readonly or ReadWrite
 	OpenFlag int
 
 	metaHandle struct {
-		coh    *daos.ContHandle
-		oid    *daos.ObjectID
-		oh     *daos.ObjectHandle
-		update bool
-		epoch  daos.Epoch
+		coh     *daos.ContHandle
+		oid     *daos.ObjectID
+		oh      *daos.ObjectHandle
+		update  bool
+		epoch   daos.Epoch
+		creator string
+		created time.Time
+		contOID *daos.ObjectID
 	}
 )
 
@@ -114,19 +117,9 @@ func (h *Handle) PoolMetaInit() error {
 		return errors.Wrap(err, "lookup current user")
 	}
 
-	err = oh.Put(e, PoolMetaDkey, CreatorAkey, []byte(user.Name))
-	if err != nil {
-		return errors.Wrap(err, "put creator")
-	}
-
 	b, err := json.Marshal(time.Now())
 	if err != nil {
 		return errors.Wrap(err, "marshal time")
-	}
-
-	err = oh.Put(e, PoolMetaDkey, CreatedAkey, b)
-	if err != nil {
-		return errors.Wrap(err, "put created")
 	}
 
 	coid := daos.GenerateOID(daos.ClassTinyRW)
@@ -139,10 +132,12 @@ func (h *Handle) PoolMetaInit() error {
 	if err != nil {
 		return errors.Wrap(err, "marshal oid")
 	}
-	err = oh.Put(e, PoolMetaDkey, ContTableAkey, b2)
-	if err != nil {
-		return errors.Wrap(err, "put cont oid")
-	}
+
+	err = oh.PutKeys(e, PoolMetaDkey, map[string][]byte{
+		CreatorAkey:   []byte(user.Name),
+		CreatedAkey:   b,
+		ContTableAkey: b2,
+	})
 
 	pm, err := h.openMeta(ReadWrite)
 	if err != nil {
@@ -276,6 +271,7 @@ func (h *Handle) openMeta(of OpenFlag) (*metaHandle, error) {
 	}
 
 	m.oid = daos.ObjectIDInit(0, 0, 1, daos.ClassLargeRW)
+	m.init()
 	return m, nil
 
 }
@@ -323,52 +319,64 @@ func (m *metaHandle) Get(akey string) ([]byte, error) {
 		return nil, errors.Wrap(err, "open meta")
 	}
 
-	return oh.Get(m.epoch, PoolMetaDkey, akey)
+	//	return oh.Get(m.epoch, PoolMetaDkey, akey)
+	kv, err := oh.GetKeys(m.epoch, PoolMetaDkey, []string{akey})
+	if err != nil {
+		return nil, errors.Wrap(err, "get keys")
+	}
+	return kv[akey], nil
+}
+
+func (m *metaHandle) init() error {
+	oh, err := m.open()
+	if err != nil {
+		return errors.Wrap(err, "open meta")
+	}
+
+	attrs, err := oh.GetKeys(m.epoch, PoolMetaDkey, []string{CreatorAkey, CreatedAkey, ContTableAkey})
+	if err != nil {
+		return errors.Wrap(err, "get keys")
+	}
+	if buf, ok := attrs[CreatorAkey]; ok {
+		m.creator = string(buf)
+	}
+
+	if buf, ok := attrs[CreatedAkey]; ok {
+		err = json.Unmarshal(buf, &m.created)
+		if err != nil {
+			return errors.Wrapf(err, "create time: %s", buf)
+		}
+	}
+
+	if buf, ok := attrs[ContTableAkey]; ok {
+		err = json.Unmarshal(buf, &m.contOID)
+		if err != nil {
+			return errors.Wrapf(err, "unmarshal coid: '%s'", buf)
+		}
+
+	}
+	return nil
 }
 
 // Creator returns the username of user that created the pool.
-func (m *metaHandle) Creator() (string, error) {
-	creator, err := m.Get(CreatorAkey)
-	if err != nil {
-		return "", errors.Wrap(err, "get creator failed")
-	}
-	return string(creator), nil
+func (m *metaHandle) Creator() string {
+	return m.creator
 }
 
 // Created returns tiem the pool was created.
-func (m *metaHandle) Created() (time.Time, error) {
-	buf, err := m.Get(CreatedAkey)
-	if err != nil {
-		return time.Time{}, errors.Wrap(err, "get created failed")
-	}
-	var created time.Time
-	err = json.Unmarshal(buf, &created)
-	if err != nil {
-		return time.Time{}, errors.Wrapf(err, "create time: %s", buf)
-	}
-	return created, nil
+func (m *metaHandle) Created() time.Time {
+	return m.created
 }
 
 // ContTable returns DAOS ObjectID for the container map object.
-func (m *metaHandle) ContTable() (*daos.ObjectID, error) {
-	buf, err := m.Get(ContTableAkey)
-	if err != nil {
-		return nil, errors.Wrap(err, "get cont table failed")
-	}
-	var coid daos.ObjectID
-	err = json.Unmarshal(buf, &coid)
-	if err != nil {
-		return nil, errors.Wrapf(err, "unmarshal coid: '%s'", buf)
-	}
-	return &coid, nil
+func (m *metaHandle) ContTable() *daos.ObjectID {
+	return m.contOID
 }
 
 // OpenContTable retuns open handle for the container map.
 func (m *metaHandle) OpenContTable() (*daos.ObjectHandle, error) {
-	oid, err := m.ContTable()
-	if err != nil {
-		return nil, errors.Wrap(err, "fetch cont_table id")
-	}
+	oid := m.ContTable()
+
 	flags := daos.ObjOpenRO
 	if m.update {
 		flags = daos.ObjOpenRW

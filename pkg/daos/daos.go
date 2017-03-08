@@ -825,6 +825,19 @@ func (oh *ObjectHandle) Putb(e Epoch, dkey []byte, akey []byte, value []byte) er
 	return oh.Update(e, dkey, []*KeyRequest{kr})
 }
 
+func (oh *ObjectHandle) PutKeys(e Epoch, dkey string, akeys map[string][]byte) error {
+	var request []*KeyRequest
+
+	for k := range akeys {
+		kr := NewKeyRequest([]byte(k))
+		kr.Put(0, 1, uint64(len(akeys[k])), akeys[k])
+		request = append(request, kr)
+
+	}
+
+	return oh.Update(e, []byte(dkey), request)
+}
+
 const (
 	RecAny   = C.DAOS_REC_ANY
 	EpochMax = Epoch(0xffffffffffffffff)
@@ -850,4 +863,30 @@ func (oh *ObjectHandle) Getb(e Epoch, dkey []byte, akey []byte) ([]byte, error) 
 	}
 
 	return nil, nil
+}
+
+// GetKeys returns first record for a-key.
+func (oh *ObjectHandle) GetKeys(e Epoch, dkey string, akeys []string) (map[string][]byte, error) {
+	var request []*KeyRequest
+
+	for k := range akeys {
+		kr := NewKeyRequest([]byte(akeys[k]))
+		kr.Get(0, 1, RecAny)
+		request = append(request, kr)
+
+	}
+
+	err := oh.Fetch(e, []byte(dkey), request)
+	if err != nil {
+		return nil, err
+	}
+
+	kv := make(map[string][]byte)
+	for _, kr := range request {
+		if len(kr.Buffers) > 0 {
+			kv[string(kr.Attr)] = kr.Buffers[0]
+		}
+	}
+
+	return kv, nil
 }

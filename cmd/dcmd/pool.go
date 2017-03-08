@@ -150,25 +150,13 @@ func poolInfo(c *cli.Context) error {
 	}
 	defer meta.Close()
 
-	creator, err := meta.Creator()
-	if err != nil {
-		return err
-	}
-	created, err := meta.Created()
-	if err != nil {
-		return err
-	}
-	conttab, err := meta.ContTable()
-	if err != nil {
-		return err
-	}
 	fmt.Printf("Pool:       %s\n", info.UUID())
 	fmt.Printf("Mode:       0%o\n", info.Mode())
 	fmt.Printf("Targets:    %d\n", info.NumTargets())
 	fmt.Printf("Disabled:   %d\n", info.NumDisabled())
-	fmt.Printf("Creator:    %s\n", creator)
-	fmt.Printf("Created:    %s\n", created)
-	fmt.Printf("ContTable:  %s\n", conttab)
+	fmt.Printf("Creator:    %s\n", meta.Creator())
+	fmt.Printf("Created:    %s\n", meta.Created())
+	fmt.Printf("ContTable:  %s\n", meta.ContTable())
 
 	return nil
 }

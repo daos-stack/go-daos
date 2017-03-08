@@ -550,9 +550,9 @@ func objInspect(c *cli.Context) error {
 				continue
 			}
 			if c.Bool("hex") {
-				fmt.Printf("%s/%s", hex.EncodeToString(dkey), hex.EncodeToString(akey))
+				fmt.Printf("%s:%s", hex.EncodeToString(dkey), hex.EncodeToString(akey))
 			} else {
-				fmt.Printf("%s/%s", dkey, akey)
+				fmt.Printf("%s:%s", dkey, akey)
 			}
 			if c.Bool("size") {
 				fmt.Printf(" %d", recSize)
