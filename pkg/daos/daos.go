@@ -57,6 +57,19 @@ func Fini() {
 	C.daos_fini()
 }
 
+// Handle is an interface for DAOS handle types
+type Handle interface {
+	Pointer() *C.daos_handle_t
+	H() C.daos_handle_t
+	Zero()
+}
+
+// HandleIsInvalid returns a boolean indicating whether or not the
+// handle is invalid.
+func HandleIsInvalid(h Handle) bool {
+	return bool(C.daos_handle_is_inval(h.H()))
+}
+
 // Returns an failure if rc != 0. If err is already set
 // then it is wrapped, otherwise it is ignored.
 func rc2err(label string, rc C.int, err error) error {
@@ -224,9 +237,15 @@ func (poh *PoolHandle) Pointer() *C.daos_handle_t {
 	return (*C.daos_handle_t)(poh)
 }
 
+// Zero resets the handle to the invalid state
+func (poh *PoolHandle) Zero() {
+	poh.Pointer().cookie = 0
+}
+
 // Disconnect closes the pool handle.
 func (poh *PoolHandle) Disconnect() error {
 	rc, err := C.daos_pool_disconnect(poh.H(), nil)
+	poh.Zero()
 	return rc2err("daos_pool_disconnect", rc, err)
 }
 
@@ -289,6 +308,11 @@ func (coh *ContHandle) Pointer() *C.daos_handle_t {
 	return (*C.daos_handle_t)(coh)
 }
 
+// Zero resets the handle to the invalid state
+func (coh *ContHandle) Zero() {
+	coh.Pointer().cookie = 0
+}
+
 // Open a the container identified by the UUID
 func (poh *PoolHandle) Open(uuid string, flags int) (*ContHandle, error) {
 	cuuid, err := str2uuid(uuid)
@@ -320,6 +344,8 @@ func (coh *ContHandle) Destroy(uuid string, force bool) error {
 	if err := rc2err("daos_cont_destroy", rc, err); err != nil {
 		return err
 	}
+
+	coh.Zero()
 	return nil
 }
 
@@ -550,6 +576,24 @@ func (o *ObjectID) Pointer() *C.daos_obj_id_t {
 	return (*C.daos_obj_id_t)(o)
 }
 
+func (o *ObjectID) Hi() uint32 {
+	// top half of .hi is reserved
+	return uint32(o.hi)
+}
+
+func (o *ObjectID) Mid() uint64 {
+	return uint64(o.mid)
+}
+
+func (o *ObjectID) Lo() uint64 {
+	return uint64(o.lo)
+}
+
+func (o *ObjectID) Class() OClassID {
+	c := C.daos_obj_id2class(o.Native())
+	return OClassID(c)
+}
+
 func (o *ObjectID) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + o.String() + `"`), nil
 }
@@ -694,11 +738,6 @@ func ObjectIDInit(hi uint32, mid, lo uint64, class OClassID) *ObjectID {
 	return &oid
 }
 
-func ObjectToClass(oid *ObjectID) OClassID {
-	c := C.daos_obj_id2class(oid.Native())
-	return OClassID(c)
-}
-
 func (oa *ObjectAttribute) Pointer() *C.daos_obj_attr_t {
 	return (*C.daos_obj_attr_t)(oa)
 }
@@ -709,6 +748,11 @@ func (oh *ObjectHandle) H() C.daos_handle_t {
 
 func (oh *ObjectHandle) Pointer() *C.daos_handle_t {
 	return (*C.daos_handle_t)(oh)
+}
+
+// Zero resets the handle to the invalid state
+func (oh *ObjectHandle) Zero() {
+	oh.Pointer().cookie = 0
 }
 
 func (coh *ContHandle) ObjectDeclare(oid *ObjectID, e Epoch, oa *ObjectAttribute) error {
@@ -737,6 +781,7 @@ func (coh *ContHandle) ObjectOpen(oid *ObjectID, e Epoch, mode ObjectOpenFlag) (
 
 func (oh *ObjectHandle) Close() error {
 	rc, err := C.daos_obj_close(oh.H(), nil)
+	oh.Zero()
 	return rc2err("daos_obj_close", rc, err)
 }
 
