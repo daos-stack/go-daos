@@ -16,7 +16,7 @@ type Dir struct {
 }
 
 // NewDir returns a *Dir
-func NewDir(node *daosfs.DaosNode) *Dir {
+func NewDir(node *daosfs.Node) *Dir {
 	return &Dir{
 		Node: Node{
 			node: node,

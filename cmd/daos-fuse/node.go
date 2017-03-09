@@ -12,9 +12,9 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Node wraps a *daosfs.DaosNode
+// Node wraps a *daosfs.Node
 type Node struct {
-	node *daosfs.DaosNode
+	node *daosfs.Node
 }
 
 // Attr implements the base fs.Node interface

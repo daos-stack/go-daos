@@ -12,12 +12,13 @@ import (
 
 // FileHandle encapsulates functionality for performing file i/o
 type FileHandle struct {
-	node *DaosNode
+	node *Node
 
 	Flags uint32
 }
 
-func NewFileHandle(node *DaosNode, flags uint32) *FileHandle {
+// NewFileHandle returns a FileHandle for file i/o
+func NewFileHandle(node *Node, flags uint32) *FileHandle {
 	return &FileHandle{
 		node:  node,
 		Flags: flags,

@@ -20,7 +20,7 @@ type File struct {
 }
 
 // NewFile returns a *File
-func NewFile(node *daosfs.DaosNode) *File {
+func NewFile(node *daosfs.Node) *File {
 	return &File{
 		Node: Node{
 			node: node,
@@ -28,6 +28,7 @@ func NewFile(node *daosfs.DaosNode) *File {
 	}
 }
 
+// Open implements the FileOpener interface
 func (f *File) Open(ctx context.Context, req *fuse.OpenRequest, res *fuse.OpenResponse) (fs.Handle, error) {
 	h, err := f.node.Open(uint32(req.Flags))
 	return &FileHandle{handle: h}, err

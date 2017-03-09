@@ -19,7 +19,7 @@ var (
 // DaosFileSystem provides a filesystem-like interface to DAOS
 type DaosFileSystem struct {
 	Name string
-	root *DaosNode
+	root *Node
 	uh   *ufd.Handle
 	ch   *daos.ContHandle
 	og   *oidGenerator
@@ -38,7 +38,7 @@ func NewDaosFileSystem(group, pool, container string) (*DaosFileSystem, error) {
 	dfs := &DaosFileSystem{
 		Name: container,
 		uh:   uh,
-		root: &DaosNode{
+		root: &Node{
 			oid:      RootOID,
 			parent:   RootOID,
 			modeType: os.ModeDir,
@@ -86,7 +86,7 @@ func (dfs *DaosFileSystem) getRootObject() error {
 }
 
 // Root returns the root node
-func (dfs *DaosFileSystem) Root() *DaosNode {
+func (dfs *DaosFileSystem) Root() *Node {
 	return dfs.root
 }
 

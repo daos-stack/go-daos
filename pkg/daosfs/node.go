@@ -13,8 +13,8 @@ import (
 	"github.com/pkg/errors"
 )
 
-// DaosAttr represents a DaosNode's file attributes
-type DaosAttr struct {
+// Attr represents a Node's file attributes
+type Attr struct {
 	Inode uint64 // fuse only handles a uint64
 	Size  uint64
 	Mtime time.Time
@@ -43,8 +43,8 @@ type CreateRequest struct {
 	Mode  os.FileMode
 }
 
-// DaosNode represents a file or directory stored in DAOS
-type DaosNode struct {
+// Node represents a file or directory stored in DAOS
+type Node struct {
 	fs       *DaosFileSystem
 	oh       *daos.ObjectHandle
 	oid      *daos.ObjectID
@@ -59,11 +59,11 @@ type DirEntry struct {
 	modeType os.FileMode
 }
 
-func (n *DaosNode) openObjectLatest() error {
+func (n *Node) openObjectLatest() error {
 	return n.openObject(daos.EpochMax)
 }
 
-func (n *DaosNode) openObject(e daos.Epoch) (err error) {
+func (n *Node) openObject(e daos.Epoch) (err error) {
 	// Don't open again if it's already open
 	if n.oh != nil && !daos.HandleIsInvalid(n.oh) {
 		return
@@ -77,7 +77,7 @@ func (n *DaosNode) openObject(e daos.Epoch) (err error) {
 	return
 }
 
-func (n *DaosNode) closeObject() error {
+func (n *Node) closeObject() error {
 	if n.oh == nil || daos.HandleIsInvalid(n.oh) {
 		return nil
 	}
@@ -86,7 +86,7 @@ func (n *DaosNode) closeObject() error {
 	return n.oh.Close()
 }
 
-func (n *DaosNode) getSize() (uint64, error) {
+func (n *Node) getSize() (uint64, error) {
 	if err := n.openObjectLatest(); err != nil {
 		return 0, err
 	}
@@ -100,11 +100,11 @@ func (n *DaosNode) getSize() (uint64, error) {
 	return binary.LittleEndian.Uint64(val), nil
 }
 
-func (n *DaosNode) currentEpoch() daos.Epoch {
+func (n *Node) currentEpoch() daos.Epoch {
 	return daos.EpochMax
 }
 
-func (n *DaosNode) createEntry(name string) (*DirEntry, error) {
+func (n *Node) createEntry(name string) (*DirEntry, error) {
 	epoch := n.currentEpoch()
 	kv, err := n.oh.GetKeys(epoch, name, []string{"OID", "ModeType"})
 
@@ -130,7 +130,7 @@ func (n *DaosNode) createEntry(name string) (*DirEntry, error) {
 }
 
 // Attr retrieves the latest attributes for a node
-func (n *DaosNode) Attr() (*DaosAttr, error) {
+func (n *Node) Attr() (*Attr, error) {
 	if err := n.openObjectLatest(); err != nil {
 		return nil, err
 	}
@@ -149,7 +149,7 @@ func (n *DaosNode) Attr() (*DaosAttr, error) {
 		attrs = append(attrs, result...)
 	}
 
-	da := &DaosAttr{
+	da := &Attr{
 		Inode: n.Inode(),
 	}
 	for i := range attrs {
@@ -177,25 +177,25 @@ func (n *DaosNode) Attr() (*DaosAttr, error) {
 	return da, nil
 }
 
-func (n *DaosNode) String() string {
+func (n *Node) String() string {
 	return fmt.Sprintf("oid: %s, parent: %s, name: %s", n.oid, n.parent, n.Name)
 }
 
 // Type returns the node type (ModeDir, ModeSymlink, etc)
-func (n *DaosNode) Type() os.FileMode {
+func (n *Node) Type() os.FileMode {
 	return n.modeType
 }
 
 // Inode returns the node's Inode representation
-func (n *DaosNode) Inode() uint64 {
+func (n *Node) Inode() uint64 {
 	// Fuse only supports uint64 Inodes, so just use the bottom part
 	// of the OID
 	return n.oid.Lo()
 }
 
-// Children returns a slice of child *DaosNodes
-func (n *DaosNode) Children() ([]*DaosNode, error) {
-	var children []*DaosNode
+// Children returns a slice of child *Nodes
+func (n *Node) Children() ([]*Node, error) {
+	var children []*Node
 
 	debug.Printf("getting children of %s (%s)", n.oid, n.Name)
 	if err := n.openObjectLatest(); err != nil {
@@ -211,7 +211,7 @@ func (n *DaosNode) Children() ([]*DaosNode, error) {
 		}
 		debug.Printf("fetched %d keys for %s @ epoch %d", len(keys), n.oid, daos.EpochMax)
 
-		chunk := make([]*DaosNode, 0, len(keys))
+		chunk := make([]*Node, 0, len(keys))
 		for i := range keys {
 			// Skip the attributes dkey
 			if string(keys[i]) == "." {
@@ -222,7 +222,7 @@ func (n *DaosNode) Children() ([]*DaosNode, error) {
 				return nil, errors.Wrapf(err, "Failed to fetch entry for %s", keys[i])
 			}
 
-			chunk = append(chunk, &DaosNode{
+			chunk = append(chunk, &Node{
 				oid:      &entry.oid,
 				parent:   n.oid,
 				fs:       n.fs,
@@ -243,7 +243,7 @@ func (n *DaosNode) Children() ([]*DaosNode, error) {
 
 // Lookup attempts to find the object associated with the name and
 // returns a *daos.Node if found
-func (n *DaosNode) Lookup(name string) (*DaosNode, error) {
+func (n *Node) Lookup(name string) (*Node, error) {
 	debug.Printf("looking up %s in %s", name, n.oid)
 	if err := n.openObjectLatest(); err != nil {
 		return nil, err
@@ -254,7 +254,7 @@ func (n *DaosNode) Lookup(name string) (*DaosNode, error) {
 	if err != nil {
 		return nil, errors.Wrapf(err, "Failed to fetch entry for %s", name)
 	}
-	return &DaosNode{
+	return &Node{
 		oid:      &entry.oid,
 		parent:   n.oid,
 		fs:       n.fs,
@@ -263,7 +263,7 @@ func (n *DaosNode) Lookup(name string) (*DaosNode, error) {
 	}, nil
 }
 
-func (n *DaosNode) createChild(uid, gid uint32, mode os.FileMode, name string) (*DaosNode, error) {
+func (n *Node) createChild(uid, gid uint32, mode os.FileMode, name string) (*Node, error) {
 	if child, _ := n.Lookup(name); child != nil {
 		debug.Printf("In Mkdir(): %s already exists!", name)
 		return nil, syscall.EEXIST
@@ -306,7 +306,7 @@ func (n *DaosNode) createChild(uid, gid uint32, mode os.FileMode, name string) (
 	// FIXME: Can all of this be done in one go, atomically? Right now
 	// if one of the akey puts fails, we sill have the child entry
 	// with wonky attributes...
-	child := &DaosNode{
+	child := &Node{
 		oid:    nextOID,
 		parent: n.oid,
 		fs:     n.fs,
@@ -351,23 +351,23 @@ func (n *DaosNode) createChild(uid, gid uint32, mode os.FileMode, name string) (
 }
 
 // Mkdir attempts to create a new child Node
-func (n *DaosNode) Mkdir(req *MkdirRequest) (*DaosNode, error) {
+func (n *Node) Mkdir(req *MkdirRequest) (*Node, error) {
 	return n.createChild(req.Uid, req.Gid, req.Mode, req.Name)
 }
 
 // Create attempts to create a new child node and returns a filehandle to it
-func (n *DaosNode) Create(req *CreateRequest) (*DaosNode, *FileHandle, error) {
+func (n *Node) Create(req *CreateRequest) (*Node, *FileHandle, error) {
 	child, err := n.createChild(req.Uid, req.Gid, req.Mode, req.Name)
 
 	return child, &FileHandle{node: child, Flags: req.Flags}, err
 }
 
 // Open returns a filehandle
-func (n *DaosNode) Open(flags uint32) (*FileHandle, error) {
+func (n *Node) Open(flags uint32) (*FileHandle, error) {
 	return NewFileHandle(n, flags), nil
 }
 
-func (n *DaosNode) destroyChild(child *DaosNode) error {
+func (n *Node) destroyChild(child *Node) error {
 	epoch, err := n.fs.ch.EpochHold(0)
 	if err != nil {
 		return errors.Wrap(err, "Unable to hold epoch")
@@ -399,7 +399,7 @@ func (n *DaosNode) destroyChild(child *DaosNode) error {
 }
 
 // Remove punches the object and ... ?
-func (n *DaosNode) Remove(name string, dir bool) error {
+func (n *Node) Remove(name string, dir bool) error {
 	child, err := n.Lookup(name)
 	if err != nil {
 		return err
