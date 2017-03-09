@@ -104,9 +104,12 @@ func (n *Node) currentEpoch() daos.Epoch {
 	return daos.EpochMax
 }
 
-func (n *Node) createEntry(name string) (*DirEntry, error) {
+func (n *Node) fetchEntry(name string) (*DirEntry, error) {
 	epoch := n.currentEpoch()
 	kv, err := n.oh.GetKeys(epoch, name, []string{"OID", "ModeType"})
+	if err != nil {
+		return nil, errors.Wrap(err, "GetKeys failed")
+	}
 
 	var dentry DirEntry
 
@@ -117,16 +120,69 @@ func (n *Node) createEntry(name string) (*DirEntry, error) {
 			return nil, errors.Wrapf(err, "Failed to unmarshal %q", rawOID)
 		}
 	} else {
-		return nil, errors.Wrapf(err, "Failed to fetch OID attr for %s", name)
+		return nil, errors.Errorf("Failed to fetch OID attr for %s", name)
 	}
 
 	if val, ok := kv["ModeType"]; ok {
 		dentry.modeType = os.FileMode(binary.LittleEndian.Uint32(val))
 	} else {
-		return nil, errors.Wrapf(err, "Failed to fetch ModeType attr for %s", name)
+		return nil, errors.Errorf("Failed to fetch ModeType attr for %s", name)
 	}
 
 	return &dentry, nil
+}
+
+func (n *Node) writeEntry(epoch daos.Epoch, name string, dentry *DirEntry) error {
+	kv := make(map[string][]byte)
+	debug.Printf("%s: entry %#v", name, dentry)
+	// FIXME: Don't marshal
+	buf, err := json.Marshal(&dentry.oid)
+	if err != nil {
+		return errors.Wrapf(err, "Can't marshal %s", dentry.oid)
+	}
+	kv["OID"] = buf
+	debug.Printf("%s: entry %v", name, buf)
+
+	buf = make([]byte, 4)
+	binary.LittleEndian.PutUint32(buf, uint32(dentry.modeType))
+	kv["ModeType"] = buf
+
+	if err := n.oh.PutKeys(epoch, name, kv); err != nil {
+		return errors.Wrapf(err, "Failed to store attrs to %s", name)
+	}
+
+	return nil
+}
+
+func (n *Node) writeAttr(epoch daos.Epoch, attr *Attr) error {
+	kv := make(map[string][]byte)
+
+	buf := make([]byte, 4)
+	binary.LittleEndian.PutUint32(buf, uint32(attr.Mode))
+	kv["Mode"] = buf
+
+	buf = make([]byte, 4)
+	binary.LittleEndian.PutUint32(buf, attr.Uid)
+	kv["Uid"] = buf
+
+	buf = make([]byte, 4)
+	binary.LittleEndian.PutUint32(buf, attr.Gid)
+	kv["Gid"] = buf
+
+	buf = make([]byte, 8)
+	binary.LittleEndian.PutUint64(buf, attr.Size)
+	kv["Size"] = buf
+
+	mtime, err := attr.Mtime.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	kv["Mtime"] = mtime
+
+	if err := n.oh.PutKeys(epoch, ".", kv); err != nil {
+		return errors.Wrap(err, "Failed to update child attrs")
+	}
+	return nil
 }
 
 // Attr retrieves the latest attributes for a node
@@ -136,29 +192,19 @@ func (n *Node) Attr() (*Attr, error) {
 	}
 	defer n.closeObject()
 
-	// FIXME: Figure out how to get all akeys and their values in
-	// one go!
-	var attrs [][]byte
-	dkey := []byte(".")
-	var anchor daos.Anchor
-	for !anchor.EOF() {
-		result, err := n.oh.AttrKeys(daos.EpochMax, dkey, &anchor)
-		if err != nil {
-			return nil, err
-		}
-		attrs = append(attrs, result...)
-	}
-
 	da := &Attr{
 		Inode: n.Inode(),
 	}
-	for i := range attrs {
-		val, err := n.oh.Getb(daos.EpochMax, dkey, attrs[i])
-		if err != nil {
-			return nil, errors.Wrapf(err, "Failed to fetch %s/%s on %s", dkey, attrs[i], n.oid)
-		}
 
-		switch string(attrs[i]) {
+	dkey := "."
+	kv, err := n.oh.GetKeys(n.currentEpoch(), dkey, []string{"Size", "Mtime", "Mode", "Uid", "Gid"})
+	if err != nil {
+		return nil, errors.Wrapf(err, "get attrs for node %s", dkey)
+	}
+
+	for key := range kv {
+		val := kv[key]
+		switch string(key) {
 		case "Size":
 			da.Size = binary.LittleEndian.Uint64(val)
 		case "Mtime":
@@ -217,7 +263,7 @@ func (n *Node) Children() ([]*Node, error) {
 			if string(keys[i]) == "." {
 				continue
 			}
-			entry, err := n.createEntry(string(keys[i]))
+			entry, err := n.fetchEntry(string(keys[i]))
 			if err != nil {
 				return nil, errors.Wrapf(err, "Failed to fetch entry for %s", keys[i])
 			}
@@ -250,10 +296,11 @@ func (n *Node) Lookup(name string) (*Node, error) {
 	}
 	defer n.closeObject()
 
-	entry, err := n.createEntry(name)
+	entry, err := n.fetchEntry(name)
 	if err != nil {
 		return nil, errors.Wrapf(err, "Failed to fetch entry for %s", name)
 	}
+	debug.Printf("%s: entry %#v", name, entry)
 	return &Node{
 		oid:      &entry.oid,
 		parent:   n.oid,
@@ -288,24 +335,12 @@ func (n *Node) createChild(uid, gid uint32, mode os.FileMode, name string) (*Nod
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to get next OID in Mkdir")
 	}
-	// FIXME: Don't marshal
-	buf, err := json.Marshal(nextOID)
+
+	err = n.writeEntry(epoch, name, &DirEntry{*nextOID, os.FileMode(mode & os.ModeType)})
 	if err != nil {
-		return nil, errors.Wrapf(err, "Can't marshal %s", nextOID)
+		return nil, errors.Wrap(err, "Failed to write entry")
 	}
 
-	if err := n.oh.Put(epoch, name, "OID", buf); err != nil {
-		return nil, errors.Wrapf(err, "Failed to add OID attr to %s", name)
-	}
-	buf = make([]byte, 4)
-	binary.LittleEndian.PutUint32(buf, uint32(mode&os.ModeType))
-	if err := n.oh.Put(epoch, name, "ModeType", buf); err != nil {
-		return nil, errors.Wrapf(err, "Failed to add ModeType attr to %s", name)
-	}
-
-	// FIXME: Can all of this be done in one go, atomically? Right now
-	// if one of the akey puts fails, we sill have the child entry
-	// with wonky attributes...
 	child := &Node{
 		oid:    nextOID,
 		parent: n.oid,
@@ -318,30 +353,16 @@ func (n *Node) createChild(uid, gid uint32, mode os.FileMode, name string) (*Nod
 	defer child.closeObject()
 	debug.Printf("Created new child object %s", child)
 
-	buf = make([]byte, 4)
-	binary.LittleEndian.PutUint32(buf, uint32(mode))
-	if err := child.oh.Put(epoch, ".", "Mode", buf); err != nil {
-		return nil, errors.Wrap(err, "Failed to update child attrs")
+	attr := &Attr{
+		Mode:  os.FileMode(mode),
+		Uid:   uid,
+		Gid:   gid,
+		Mtime: time.Now(),
 	}
-	binary.LittleEndian.PutUint32(buf, uid)
-	if err := child.oh.Put(epoch, ".", "Uid", buf); err != nil {
-		return nil, errors.Wrap(err, "Failed to update child attrs")
-	}
-	binary.LittleEndian.PutUint32(buf, gid)
-	if err := child.oh.Put(epoch, ".", "Gid", buf); err != nil {
-		return nil, errors.Wrap(err, "Failed to update child attrs")
-	}
-	buf = make([]byte, 8)
-	binary.LittleEndian.PutUint64(buf, 0)
-	if err := child.oh.Put(epoch, ".", "Size", buf); err != nil {
-		return nil, errors.Wrap(err, "Failed to update child attrs")
-	}
-	mtime, err := time.Now().MarshalBinary()
+
+	err = child.writeAttr(epoch, attr)
 	if err != nil {
-		return nil, err
-	}
-	if err := child.oh.Put(epoch, ".", "Mtime", mtime); err != nil {
-		return nil, errors.Wrap(err, "Failed to update child attrs")
+		return nil, errors.Wrap(err, "Failed to write attributes")
 	}
 
 	debug.Printf("Successfully created %s/%s", n.Name, child.Name)

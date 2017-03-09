@@ -914,8 +914,9 @@ func (oh *ObjectHandle) Getb(e Epoch, dkey []byte, akey []byte) ([]byte, error) 
 	return nil, nil
 }
 
-// GetKeys returns first record for a-key.
+// GetKeys returns first record for each a-key available in the specified epoch.
 func (oh *ObjectHandle) GetKeys(e Epoch, dkey string, akeys []string) (map[string][]byte, error) {
+	kv := make(map[string][]byte)
 	var request []*KeyRequest
 
 	for k := range akeys {
@@ -925,12 +926,32 @@ func (oh *ObjectHandle) GetKeys(e Epoch, dkey string, akeys []string) (map[strin
 
 	}
 
-	err := oh.Fetch(e, []byte(dkey), request)
+	err := oh.Inspect(e, []byte(dkey), request)
 	if err != nil {
 		return nil, err
 	}
 
-	kv := make(map[string][]byte)
+	var fetch []*KeyRequest
+
+	// Only fetch akeys that have a size
+	for _, req := range request {
+		for _, extent := range req.Extents {
+			if extent.RecSize != RecAny {
+				fetch = append(fetch, req)
+			}
+		}
+	}
+
+	// If no a-keys are available, return empty result.
+	if len(fetch) == 0 {
+		return kv, nil
+	}
+
+	err = oh.Fetch(e, []byte(dkey), fetch)
+	if err != nil {
+		return nil, err
+	}
+
 	for _, kr := range request {
 		if len(kr.Buffers) > 0 {
 			kv[string(kr.Attr)] = kr.Buffers[0]
