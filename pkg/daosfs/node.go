@@ -134,14 +134,13 @@ func (n *Node) fetchEntry(name string) (*DirEntry, error) {
 
 func (n *Node) writeEntry(epoch daos.Epoch, name string, dentry *DirEntry) error {
 	kv := make(map[string][]byte)
-	debug.Printf("%s: entry %#v", name, dentry)
+
 	// FIXME: Don't marshal
 	buf, err := json.Marshal(&dentry.oid)
 	if err != nil {
 		return errors.Wrapf(err, "Can't marshal %s", dentry.oid)
 	}
 	kv["OID"] = buf
-	debug.Printf("%s: entry %v", name, buf)
 
 	buf = make([]byte, 4)
 	binary.LittleEndian.PutUint32(buf, uint32(dentry.modeType))
