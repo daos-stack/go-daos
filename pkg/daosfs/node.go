@@ -54,6 +54,11 @@ type DaosNode struct {
 	Name string
 }
 
+type DirEntry struct {
+	oid      daos.ObjectID
+	modeType os.FileMode
+}
+
 func (n *DaosNode) openObjectLatest() error {
 	return n.openObject(daos.EpochMax)
 }
@@ -93,6 +98,35 @@ func (n *DaosNode) getSize() (uint64, error) {
 	}
 
 	return binary.LittleEndian.Uint64(val), nil
+}
+
+func (n *DaosNode) currentEpoch() daos.Epoch {
+	return daos.EpochMax
+}
+
+func (n *DaosNode) createEntry(name string) (*DirEntry, error) {
+	epoch := n.currentEpoch()
+	kv, err := n.oh.GetKeys(epoch, name, []string{"OID", "ModeType"})
+
+	var dentry DirEntry
+
+	if rawOID, ok := kv["OID"]; ok {
+		// FIXME: Figure out how to bypass marshaling
+		//oid := daos.ObjectID(rawOID)
+		if err := json.Unmarshal(rawOID, &dentry.oid); err != nil {
+			return nil, errors.Wrapf(err, "Failed to unmarshal %q", rawOID)
+		}
+	} else {
+		return nil, errors.Wrapf(err, "Failed to fetch OID attr for %s", name)
+	}
+
+	if val, ok := kv["ModeType"]; ok {
+		dentry.modeType = os.FileMode(binary.LittleEndian.Uint32(val))
+	} else {
+		return nil, errors.Wrapf(err, "Failed to fetch ModeType attr for %s", name)
+	}
+
+	return &dentry, nil
 }
 
 // Attr retrieves the latest attributes for a node
@@ -183,26 +217,16 @@ func (n *DaosNode) Children() ([]*DaosNode, error) {
 			if string(keys[i]) == "." {
 				continue
 			}
-			debug.Printf("oid: %s, key: %s", n.oid, keys[i])
-			rawOID, err := n.oh.Getb(daos.EpochMax, keys[i], []byte("OID"))
+			entry, err := n.createEntry(string(keys[i]))
 			if err != nil {
-				return nil, errors.Wrapf(err, "Failed to fetch OID attr for %q", keys[i])
+				return nil, errors.Wrapf(err, "Failed to fetch entry for %s", keys[i])
 			}
-			// FIXME: Figure out how to bypass marshaling
-			//oid := daos.ObjectID(rawOID)
-			var oid daos.ObjectID
-			if err := json.Unmarshal(rawOID, &oid); err != nil {
-				return nil, errors.Wrapf(err, "Failed to unmarshal %q", rawOID)
-			}
-			val, err := n.oh.Getb(daos.EpochMax, keys[i], []byte("ModeType"))
-			if err != nil {
-				return nil, errors.Wrapf(err, "Failed to fetch ModeType attr for %q", keys[i])
-			}
+
 			chunk = append(chunk, &DaosNode{
-				oid:      &oid,
+				oid:      &entry.oid,
 				parent:   n.oid,
 				fs:       n.fs,
-				modeType: os.FileMode(binary.LittleEndian.Uint32(val)),
+				modeType: entry.modeType,
 				Name:     string(keys[i]),
 			})
 			debug.Printf("child: %s", chunk[len(chunk)-1])
@@ -226,23 +250,15 @@ func (n *DaosNode) Lookup(name string) (*DaosNode, error) {
 	}
 	defer n.closeObject()
 
-	rawOID, err := n.oh.Get(daos.EpochMax, name, "OID")
+	entry, err := n.createEntry(name)
 	if err != nil {
-		return nil, errors.Wrapf(err, "Failed to fetch OID attr for %s", name)
-	}
-	var oid daos.ObjectID
-	if err := json.Unmarshal(rawOID, &oid); err != nil {
-		return nil, errors.Wrapf(err, "Failed to unmarshal %q", rawOID)
-	}
-	val, err := n.oh.Get(daos.EpochMax, name, "ModeType")
-	if err != nil {
-		return nil, errors.Wrapf(err, "Failed to fetch ModeType attr for %s", name)
+		return nil, errors.Wrapf(err, "Failed to fetch entry for %s", name)
 	}
 	return &DaosNode{
-		oid:      &oid,
+		oid:      &entry.oid,
 		parent:   n.oid,
 		fs:       n.fs,
-		modeType: os.FileMode(binary.LittleEndian.Uint32(val)),
+		modeType: entry.modeType,
 		Name:     name,
 	}, nil
 }
