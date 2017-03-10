@@ -38,6 +38,12 @@ func (d *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 			Inode: child.Inode(),
 			Name:  child.Name,
 		}
+		switch t := child.Type; {
+		case t.IsDir():
+			ents[i].Type = fuse.DT_Dir
+		case t.IsRegular():
+			ents[i].Type = fuse.DT_File
+		}
 	}
 
 	return ents, nil

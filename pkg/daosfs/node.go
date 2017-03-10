@@ -55,8 +55,14 @@ type Node struct {
 }
 
 type DirEntry struct {
-	oid      daos.ObjectID
-	modeType os.FileMode
+	Name string
+	Oid  daos.ObjectID
+	Type os.FileMode
+}
+
+// Inode returns lowest 64 bits of Oid
+func (entry *DirEntry) Inode() uint64 {
+	return entry.Oid.Lo()
 }
 
 func (n *Node) openObjectLatest() error {
@@ -112,11 +118,12 @@ func (n *Node) fetchEntry(name string) (*DirEntry, error) {
 	}
 
 	var dentry DirEntry
+	dentry.Name = name
 
 	if rawOID, ok := kv["OID"]; ok {
 		// FIXME: Figure out how to bypass marshaling
 		//oid := daos.ObjectID(rawOID)
-		if err := json.Unmarshal(rawOID, &dentry.oid); err != nil {
+		if err := json.Unmarshal(rawOID, &dentry.Oid); err != nil {
 			return nil, errors.Wrapf(err, "Failed to unmarshal %q", rawOID)
 		}
 	} else {
@@ -124,7 +131,7 @@ func (n *Node) fetchEntry(name string) (*DirEntry, error) {
 	}
 
 	if val, ok := kv["ModeType"]; ok {
-		dentry.modeType = os.FileMode(binary.LittleEndian.Uint32(val))
+		dentry.Type = os.FileMode(binary.LittleEndian.Uint32(val))
 	} else {
 		return nil, errors.Errorf("Failed to fetch ModeType attr for %s", name)
 	}
@@ -136,14 +143,14 @@ func (n *Node) writeEntry(epoch daos.Epoch, name string, dentry *DirEntry) error
 	kv := make(map[string][]byte)
 
 	// FIXME: Don't marshal
-	buf, err := json.Marshal(&dentry.oid)
+	buf, err := json.Marshal(&dentry.Oid)
 	if err != nil {
-		return errors.Wrapf(err, "Can't marshal %s", dentry.oid)
+		return errors.Wrapf(err, "Can't marshal %s", dentry.Oid)
 	}
 	kv["OID"] = buf
 
 	buf = make([]byte, 4)
-	binary.LittleEndian.PutUint32(buf, uint32(dentry.modeType))
+	binary.LittleEndian.PutUint32(buf, uint32(dentry.Type))
 	kv["ModeType"] = buf
 
 	if err := n.oh.PutKeys(epoch, name, kv); err != nil {
@@ -239,8 +246,8 @@ func (n *Node) Inode() uint64 {
 }
 
 // Children returns a slice of child *Nodes
-func (n *Node) Children() ([]*Node, error) {
-	var children []*Node
+func (n *Node) Children() ([]*DirEntry, error) {
+	var children []*DirEntry
 
 	debug.Printf("getting children of %s (%s)", n.oid, n.Name)
 	if err := n.openObjectLatest(); err != nil {
@@ -256,7 +263,7 @@ func (n *Node) Children() ([]*Node, error) {
 		}
 		debug.Printf("fetched %d keys for %s @ epoch %d", len(keys), n.oid, daos.EpochMax)
 
-		chunk := make([]*Node, 0, len(keys))
+		chunk := make([]*DirEntry, 0, len(keys))
 		for i := range keys {
 			// Skip the attributes dkey
 			if string(keys[i]) == "." {
@@ -267,13 +274,7 @@ func (n *Node) Children() ([]*Node, error) {
 				return nil, errors.Wrapf(err, "Failed to fetch entry for %s", keys[i])
 			}
 
-			chunk = append(chunk, &Node{
-				oid:      &entry.oid,
-				parent:   n.oid,
-				fs:       n.fs,
-				modeType: entry.modeType,
-				Name:     string(keys[i]),
-			})
+			chunk = append(chunk, entry)
 			debug.Printf("child: %s", chunk[len(chunk)-1])
 		}
 
@@ -301,10 +302,10 @@ func (n *Node) Lookup(name string) (*Node, error) {
 	}
 	debug.Printf("%s: entry %#v", name, entry)
 	return &Node{
-		oid:      &entry.oid,
+		oid:      &entry.Oid,
 		parent:   n.oid,
 		fs:       n.fs,
-		modeType: entry.modeType,
+		modeType: entry.Type,
 		Name:     name,
 	}, nil
 }
@@ -335,7 +336,7 @@ func (n *Node) createChild(uid, gid uint32, mode os.FileMode, name string) (*Nod
 		return nil, errors.Wrap(err, "Failed to get next OID in Mkdir")
 	}
 
-	err = n.writeEntry(epoch, name, &DirEntry{*nextOID, os.FileMode(mode & os.ModeType)})
+	err = n.writeEntry(epoch, name, &DirEntry{name, *nextOID, os.FileMode(mode & os.ModeType)})
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to write entry")
 	}
