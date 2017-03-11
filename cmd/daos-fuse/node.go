@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"os"
-	"time"
 
 	"bazil.org/fuse"
 
@@ -23,17 +21,6 @@ func (n *Node) Attr(ctx context.Context, attr *fuse.Attr) error {
 	if err != nil {
 		debug.Printf("error in Attr(): %s", err)
 		return errors.Wrap(err, "Failed to get DAOS Node attributes")
-	}
-
-	// FIXME: This is gross, shouldn't be here.
-	// Maybe we gin this up when the container is created?
-	if n.node.Name == "/" {
-		attr.Inode = da.Inode
-		attr.Mtime = time.Now()
-		attr.Mode = os.ModeDir | 0755
-		attr.Uid = uint32(os.Getuid())
-		attr.Gid = uint32(os.Getgid())
-		return nil
 	}
 
 	attr.Inode = da.Inode

@@ -35,10 +35,6 @@ func (fh *FileHandle) Write(offset int64, data []byte) (int64, error) {
 		}
 		offset = int64(curSize)
 	}
-	if err := fh.node.openObjectLatest(); err != nil {
-		return 0, err
-	}
-	defer fh.node.closeObject()
 
 	epoch, err := fh.node.fs.ch.EpochHold(0)
 	if err != nil {
@@ -69,7 +65,9 @@ func (fh *FileHandle) Write(offset int64, data []byte) (int64, error) {
 
 	tx = fh.node.fs.ch.EpochCommit
 
-	return int64(len(data)), fh.node.oh.Update(epoch, []byte("."), keys)
+	return int64(len(data)), fh.node.withHandle(func(oh *LockableObjectHandle) error {
+		return oh.Update(epoch, []byte("."), keys)
+	})
 }
 
 func (fh *FileHandle) Read(offset, size int64, data *[]byte) error {
@@ -80,12 +78,15 @@ func (fh *FileHandle) Read(offset, size int64, data *[]byte) error {
 	if size > int64(actualSize) {
 		size = int64(actualSize)
 	}
-	if err := fh.node.openObjectLatest(); err != nil {
-		return err
-	}
-	defer fh.node.closeObject()
 
 	debug.Printf("Reading %d bytes @ offset %d from %s (%s)", size, offset, fh.node.oid, fh.node.Name)
+
+	oh, err := fh.node.oh()
+	if err != nil {
+		return err
+	}
+	oh.RLock()
+	defer oh.RUnlock()
 
 	var keys []*daos.KeyRequest
 	keys = append(keys, daos.NewKeyRequest([]byte("Data")))
@@ -93,7 +94,7 @@ func (fh *FileHandle) Read(offset, size int64, data *[]byte) error {
 	// FIXME: Need to fix the go-daos API in order to give it the data
 	// slice we're given and avoid the copy.
 	keys[0].Get(uint64(offset), uint64(size), 1)
-	if err := fh.node.oh.Fetch(daos.EpochMax, []byte("."), keys); err != nil {
+	if err := oh.Fetch(daos.EpochMax, []byte("."), keys); err != nil {
 		return err
 	}
 	*data = append(*data, keys[0].Buffers[0]...)

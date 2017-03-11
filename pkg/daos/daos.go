@@ -780,6 +780,10 @@ func (coh *ContHandle) ObjectOpen(oid *ObjectID, e Epoch, mode ObjectOpenFlag) (
 }
 
 func (oh *ObjectHandle) Close() error {
+	if HandleIsInvalid(oh) {
+		return nil
+	}
+
 	rc, err := C.daos_obj_close(oh.H(), nil)
 	oh.Zero()
 	return rc2err("daos_obj_close", rc, err)

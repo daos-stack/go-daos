@@ -46,7 +46,6 @@ type CreateRequest struct {
 // Node represents a file or directory stored in DAOS
 type Node struct {
 	fs       *DaosFileSystem
-	oh       *daos.ObjectHandle
 	oid      *daos.ObjectID
 	parent   *daos.ObjectID
 	modeType os.FileMode
@@ -65,40 +64,32 @@ func (entry *DirEntry) Inode() uint64 {
 	return entry.Oid.Lo()
 }
 
-func (n *Node) openObjectLatest() error {
-	return n.openObject(daos.EpochMax)
+// Not really happy about this, but we need to be able to prevent a cached
+// open object handle from being purged/closed while it's in use.
+func (n *Node) oh() (*LockableObjectHandle, error) {
+	return n.fs.OpenObject(n.oid)
 }
 
-func (n *Node) openObject(e daos.Epoch) (err error) {
-	// Don't open again if it's already open
-	if n.oh != nil && !daos.HandleIsInvalid(n.oh) {
-		return
-	}
-
-	debug.Printf("Opening oid %q @ %d", n.oid, e)
-	n.oh, err = n.fs.ch.ObjectOpen(n.oid, e, daos.ObjOpenRW)
+func (n *Node) withHandle(fn func(oh *LockableObjectHandle) error) error {
+	oh, err := n.oh()
 	if err != nil {
-		err = errors.Wrapf(err, "Failed to open node oid %s", n.oid)
+		return err
 	}
-	return
-}
+	oh.Lock()
+	defer oh.Unlock()
 
-func (n *Node) closeObject() error {
-	if n.oh == nil || daos.HandleIsInvalid(n.oh) {
-		return nil
-	}
-
-	debug.Printf("Closing oid %q", n.oid)
-	return n.oh.Close()
+	return fn(oh)
 }
 
 func (n *Node) getSize() (uint64, error) {
-	if err := n.openObjectLatest(); err != nil {
+	oh, err := n.oh()
+	if err != nil {
 		return 0, err
 	}
-	defer n.closeObject()
+	oh.RLock()
+	defer oh.RUnlock()
 
-	val, err := n.oh.Get(daos.EpochMax, ".", "Size")
+	val, err := oh.Get(daos.EpochMax, ".", "Size")
 	if err != nil {
 		return 0, errors.Wrapf(err, "Failed to fetch ./Size on %s", n.oid)
 	}
@@ -111,8 +102,15 @@ func (n *Node) currentEpoch() daos.Epoch {
 }
 
 func (n *Node) fetchEntry(name string) (*DirEntry, error) {
+	oh, err := n.oh()
+	if err != nil {
+		return nil, err
+	}
+	oh.RLock()
+	defer oh.RUnlock()
+
 	epoch := n.currentEpoch()
-	kv, err := n.oh.GetKeys(epoch, name, []string{"OID", "ModeType"})
+	kv, err := oh.GetKeys(epoch, name, []string{"OID", "ModeType"})
 	if err != nil {
 		return nil, errors.Wrap(err, "GetKeys failed")
 	}
@@ -153,11 +151,10 @@ func (n *Node) writeEntry(epoch daos.Epoch, name string, dentry *DirEntry) error
 	binary.LittleEndian.PutUint32(buf, uint32(dentry.Type))
 	kv["ModeType"] = buf
 
-	if err := n.oh.PutKeys(epoch, name, kv); err != nil {
-		return errors.Wrapf(err, "Failed to store attrs to %s", name)
-	}
-
-	return nil
+	return n.withHandle(func(oh *LockableObjectHandle) error {
+		return errors.Wrapf(oh.PutKeys(epoch, name, kv),
+			"Failed to store attrs to %s", name)
+	})
 }
 
 func (n *Node) writeAttr(epoch daos.Epoch, attr *Attr) error {
@@ -185,25 +182,27 @@ func (n *Node) writeAttr(epoch daos.Epoch, attr *Attr) error {
 	}
 	kv["Mtime"] = mtime
 
-	if err := n.oh.PutKeys(epoch, ".", kv); err != nil {
-		return errors.Wrap(err, "Failed to update child attrs")
-	}
-	return nil
+	return n.withHandle(func(oh *LockableObjectHandle) error {
+		return errors.Wrapf(oh.PutKeys(epoch, ".", kv),
+			"Failed to update child attrs")
+	})
 }
 
 // Attr retrieves the latest attributes for a node
 func (n *Node) Attr() (*Attr, error) {
-	if err := n.openObjectLatest(); err != nil {
+	oh, err := n.oh()
+	if err != nil {
 		return nil, err
 	}
-	defer n.closeObject()
+	oh.RLock()
+	defer oh.RUnlock()
 
 	da := &Attr{
 		Inode: n.Inode(),
 	}
 
 	dkey := "."
-	kv, err := n.oh.GetKeys(n.currentEpoch(), dkey, []string{"Size", "Mtime", "Mode", "Uid", "Gid"})
+	kv, err := oh.GetKeys(n.currentEpoch(), dkey, []string{"Size", "Mtime", "Mode", "Uid", "Gid"})
 	if err != nil {
 		return nil, errors.Wrapf(err, "get attrs for node %s", dkey)
 	}
@@ -249,15 +248,17 @@ func (n *Node) Inode() uint64 {
 func (n *Node) Children() ([]*DirEntry, error) {
 	var children []*DirEntry
 
-	debug.Printf("getting children of %s (%s)", n.oid, n.Name)
-	if err := n.openObjectLatest(); err != nil {
+	oh, err := n.oh()
+	if err != nil {
 		return nil, err
 	}
-	defer n.closeObject()
+	oh.RLock()
+	defer oh.RUnlock()
 
+	debug.Printf("getting children of %s (%s)", n.oid, n.Name)
 	var anchor daos.Anchor
 	for !anchor.EOF() {
-		keys, err := n.oh.DistKeys(daos.EpochMax, &anchor)
+		keys, err := oh.DistKeys(daos.EpochMax, &anchor)
 		if err != nil {
 			return nil, errors.Wrapf(err, "Failed to fetch dkeys for %s", n.oid)
 		}
@@ -291,23 +292,21 @@ func (n *Node) Children() ([]*DirEntry, error) {
 // returns a *daos.Node if found
 func (n *Node) Lookup(name string) (*Node, error) {
 	debug.Printf("looking up %s in %s", name, n.oid)
-	if err := n.openObjectLatest(); err != nil {
-		return nil, err
-	}
-	defer n.closeObject()
 
 	entry, err := n.fetchEntry(name)
 	if err != nil {
 		return nil, errors.Wrapf(err, "Failed to fetch entry for %s", name)
 	}
 	debug.Printf("%s: entry %#v", name, entry)
-	return &Node{
+	child := Node{
 		oid:      &entry.Oid,
 		parent:   n.oid,
 		fs:       n.fs,
 		modeType: entry.Type,
 		Name:     name,
-	}, nil
+	}
+
+	return &child, nil
 }
 
 func (n *Node) createChild(uid, gid uint32, mode os.FileMode, name string) (*Node, error) {
@@ -326,12 +325,15 @@ func (n *Node) createChild(uid, gid uint32, mode os.FileMode, name string) (*Nod
 		tx(epoch)
 	}()
 
-	if err := n.openObject(epoch); err != nil {
-		return nil, err
+	// TODO: We may need to find a better default for non-directory
+	// objects. In fact, we may need to evaluate what the best class
+	// is for directories, given that there may be implications for
+	// directories with lots of entries (i.e. lots of dkeys).
+	objClass := daos.ClassLargeRW
+	if mode.IsDir() {
+		objClass = daos.ClassTinyRW
 	}
-	defer n.closeObject()
-
-	nextOID, err := n.fs.og.Next(daos.ClassTinyRW)
+	nextOID, err := n.fs.og.Next(objClass)
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to get next OID in Mkdir")
 	}
@@ -347,10 +349,9 @@ func (n *Node) createChild(uid, gid uint32, mode os.FileMode, name string) (*Nod
 		fs:     n.fs,
 		Name:   name,
 	}
-	if err := child.openObject(epoch); err != nil {
+	if _, err = n.fs.DeclareObjectEpoch(child.oid, epoch, objClass); err != nil {
 		return nil, err
 	}
-	defer child.closeObject()
 	debug.Printf("Created new child object %s", child)
 
 	attr := &Attr{
@@ -376,14 +377,14 @@ func (n *Node) Mkdir(req *MkdirRequest) (*Node, error) {
 	return n.createChild(req.Uid, req.Gid, req.Mode, req.Name)
 }
 
-// Create attempts to create a new child node and returns a filehandle to it
+// Create attempts to create a new child node and returns a fileoh to it
 func (n *Node) Create(req *CreateRequest) (*Node, *FileHandle, error) {
 	child, err := n.createChild(req.Uid, req.Gid, req.Mode, req.Name)
 
 	return child, &FileHandle{node: child, Flags: req.Flags}, err
 }
 
-// Open returns a filehandle
+// Open returns a fileoh
 func (n *Node) Open(flags uint32) (*FileHandle, error) {
 	return NewFileHandle(n, flags), nil
 }
@@ -398,17 +399,15 @@ func (n *Node) destroyChild(child *Node) error {
 		tx(epoch)
 	}()
 
-	if err := n.openObject(epoch); err != nil {
+	oh, err := child.oh()
+	if err != nil {
 		return err
 	}
-	defer n.closeObject()
-	if err := child.openObject(epoch); err != nil {
-		return err
-	}
-	defer child.closeObject()
+	oh.Lock()
+	defer oh.Unlock()
 
 	// Apparently Punch() is not implemented yet...
-	if err := child.oh.Punch(epoch); err != nil {
+	if err := oh.Punch(epoch); err != nil {
 		return errors.Wrapf(err, "Object punch failed on %s", child.oid)
 	}
 
