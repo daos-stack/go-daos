@@ -30,6 +30,7 @@ type TwoQueueCache struct {
 	size       int
 	recentSize int
 
+	ecb         simplelru.EvictCallback
 	recent      *simplelru.LRU
 	frequent    *simplelru.LRU
 	recentEvict *simplelru.LRU
@@ -39,12 +40,18 @@ type TwoQueueCache struct {
 // New2Q creates a new TwoQueueCache using the default
 // values for the parameters.
 func New2Q(size int) (*TwoQueueCache, error) {
-	return New2QParams(size, Default2QRecentRatio, Default2QGhostEntries)
+	return New2QParams(size, Default2QRecentRatio, Default2QGhostEntries, nil)
+}
+
+// New2QEvict creates a new TwoQueueCache using the default values
+// for parameters and the given eviction callback.
+func New2QEvict(size int, ecb simplelru.EvictCallback) (*TwoQueueCache, error) {
+	return New2QParams(size, Default2QRecentRatio, Default2QGhostEntries, ecb)
 }
 
 // New2QParams creates a new TwoQueueCache using the provided
 // parameter values.
-func New2QParams(size int, recentRatio float64, ghostRatio float64) (*TwoQueueCache, error) {
+func New2QParams(size int, recentRatio float64, ghostRatio float64, ecb simplelru.EvictCallback) (*TwoQueueCache, error) {
 	if size <= 0 {
 		return nil, fmt.Errorf("invalid size")
 	}
@@ -77,6 +84,7 @@ func New2QParams(size int, recentRatio float64, ghostRatio float64) (*TwoQueueCa
 	c := &TwoQueueCache{
 		size:        size,
 		recentSize:  recentSize,
+		ecb:         ecb,
 		recent:      recent,
 		frequent:    frequent,
 		recentEvict: recentEvict,
@@ -151,7 +159,10 @@ func (c *TwoQueueCache) ensureSpace(recentEvict bool) {
 	// If the recent buffer is larger than
 	// the target, evict from there
 	if recentLen > 0 && (recentLen > c.recentSize || (recentLen == c.recentSize && !recentEvict)) {
-		k, _, _ := c.recent.RemoveOldest()
+		k, v, _ := c.recent.RemoveOldest()
+		if c.ecb != nil {
+			c.ecb(k, v)
+		}
 		c.recentEvict.Add(k, nil)
 		return
 	}
@@ -177,6 +188,13 @@ func (c *TwoQueueCache) Keys() []interface{} {
 func (c *TwoQueueCache) Remove(key interface{}) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
+
+	if c.ecb != nil {
+		if val, found := c.Get(key); found && val != nil {
+			c.ecb(key, val)
+		}
+	}
+
 	if c.frequent.Remove(key) {
 		return
 	}
@@ -191,6 +209,12 @@ func (c *TwoQueueCache) Remove(key interface{}) {
 func (c *TwoQueueCache) Purge() {
 	c.lock.Lock()
 	defer c.lock.Unlock()
+
+	if c.ecb != nil {
+		for _, item := range append(c.recent.Items(), c.frequent.Items()...) {
+			c.ecb(item[0], item[1])
+		}
+	}
 	c.recent.Purge()
 	c.frequent.Purge()
 	c.recentEvict.Purge()

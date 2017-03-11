@@ -136,6 +136,20 @@ func (c *LRU) Keys() []interface{} {
 	return keys
 }
 
+// Items returns a slice of key/val tuples in the cache, from oldest to newest.
+func (c *LRU) Items() [][]interface{} {
+	items := make([][]interface{}, len(c.items))
+	i := 0
+	for ent := c.evictList.Back(); ent != nil; ent = ent.Prev() {
+		items[i] = []interface{}{
+			ent.Value.(*entry).key,
+			ent.Value.(*entry).value,
+		}
+		i++
+	}
+	return items
+}
+
 // Len returns the number of items in the cache.
 func (c *LRU) Len() int {
 	return c.evictList.Len()
