@@ -69,7 +69,7 @@ func (n *Node) oh() (*LockableObjectHandle, error) {
 	return n.fs.OpenObject(n.oid)
 }
 
-func (n *Node) withHandle(fn func(oh *LockableObjectHandle) error) error {
+func (n *Node) withWriteHandle(fn func(oh *LockableObjectHandle) error) error {
 	oh, err := n.oh()
 	if err != nil {
 		return err
@@ -80,27 +80,7 @@ func (n *Node) withHandle(fn func(oh *LockableObjectHandle) error) error {
 	return fn(oh)
 }
 
-func (n *Node) getSize() (uint64, error) {
-	oh, err := n.oh()
-	if err != nil {
-		return 0, err
-	}
-	oh.RLock()
-	defer oh.RUnlock()
-
-	val, err := oh.Get(daos.EpochMax, ".", "Size")
-	if err != nil {
-		return 0, errors.Wrapf(err, "Failed to fetch ./Size on %s", n.oid)
-	}
-
-	return binary.LittleEndian.Uint64(val), nil
-}
-
-func (n *Node) currentEpoch() daos.Epoch {
-	return daos.EpochMax
-}
-
-func (n *Node) fetchEntry(name string) (*DirEntry, error) {
+func (n *Node) withReadHandle(fn func(oh *LockableObjectHandle) (interface{}, error)) (interface{}, error) {
 	oh, err := n.oh()
 	if err != nil {
 		return nil, err
@@ -108,10 +88,38 @@ func (n *Node) fetchEntry(name string) (*DirEntry, error) {
 	oh.RLock()
 	defer oh.RUnlock()
 
+	return fn(oh)
+}
+
+func (n *Node) getSize() (uint64, error) {
+	size, err := n.withReadHandle(func(oh *LockableObjectHandle) (interface{}, error) {
+		val, err := oh.Get(daos.EpochMax, ".", "Size")
+		if err != nil {
+			return 0, errors.Wrapf(err, "Failed to fetch ./Size on %s", n.oid)
+		}
+
+		return binary.LittleEndian.Uint64(val), nil
+	})
+
+	return size.(uint64), err
+}
+
+func (n *Node) currentEpoch() daos.Epoch {
+	return daos.EpochMax
+}
+
+func (n *Node) fetchEntry(name string) (*DirEntry, error) {
 	epoch := n.currentEpoch()
-	kv, err := oh.GetKeys(epoch, name, []string{"OID", "ModeType"})
+	kvi, err := n.withReadHandle(func(oh *LockableObjectHandle) (interface{}, error) {
+		kv, err := oh.GetKeys(epoch, name, []string{"OID", "ModeType"})
+		return kv, errors.Wrap(err, "GetKeys failed")
+	})
 	if err != nil {
-		return nil, errors.Wrap(err, "GetKeys failed")
+		return nil, err
+	}
+	kv, ok := kvi.(map[string][]byte)
+	if !ok {
+		return nil, errors.Errorf("Failed to type-assert %v!?", kvi)
 	}
 
 	var dentry DirEntry
@@ -148,7 +156,7 @@ func (n *Node) writeEntry(epoch daos.Epoch, name string, dentry *DirEntry) error
 	binary.LittleEndian.PutUint32(buf, uint32(dentry.Type))
 	kv["ModeType"] = buf
 
-	return n.withHandle(func(oh *LockableObjectHandle) error {
+	return n.withWriteHandle(func(oh *LockableObjectHandle) error {
 		return errors.Wrapf(oh.PutKeys(epoch, name, kv),
 			"Failed to store attrs to %s", name)
 	})
@@ -179,7 +187,7 @@ func (n *Node) writeAttr(epoch daos.Epoch, attr *Attr) error {
 	}
 	kv["Mtime"] = mtime
 
-	return n.withHandle(func(oh *LockableObjectHandle) error {
+	return n.withWriteHandle(func(oh *LockableObjectHandle) error {
 		return errors.Wrapf(oh.PutKeys(epoch, ".", kv),
 			"Failed to update child attrs")
 	})
@@ -187,21 +195,21 @@ func (n *Node) writeAttr(epoch daos.Epoch, attr *Attr) error {
 
 // Attr retrieves the latest attributes for a node
 func (n *Node) Attr() (*Attr, error) {
-	oh, err := n.oh()
-	if err != nil {
-		return nil, err
-	}
-	oh.RLock()
-	defer oh.RUnlock()
-
 	da := &Attr{
 		Inode: n.Inode(),
 	}
 
 	dkey := "."
-	kv, err := oh.GetKeys(n.currentEpoch(), dkey, []string{"Size", "Mtime", "Mode", "Uid", "Gid"})
+	kvi, err := n.withReadHandle(func(oh *LockableObjectHandle) (interface{}, error) {
+		kv, err := oh.GetKeys(n.currentEpoch(), dkey, []string{"Size", "Mtime", "Mode", "Uid", "Gid"})
+		return kv, errors.Wrapf(err, "get attrs for node %s", dkey)
+	})
 	if err != nil {
-		return nil, errors.Wrapf(err, "get attrs for node %s", dkey)
+		return nil, err
+	}
+	kv, ok := kvi.(map[string][]byte)
+	if !ok {
+		return nil, errors.Errorf("Failed to type-assert %v?!", kvi)
 	}
 
 	for key := range kv {
@@ -241,24 +249,21 @@ func (n *Node) Inode() uint64 {
 	return n.oid.Lo()
 }
 
-// Children returns a slice of child *Nodes
+// Children returns a slice of *DirEntry
 func (n *Node) Children() ([]*DirEntry, error) {
 	var children []*DirEntry
-
-	oh, err := n.oh()
-	if err != nil {
-		return nil, err
-	}
-	oh.RLock()
-	defer oh.RUnlock()
 
 	debug.Printf("getting children of %s (%s)", n.oid, n.Name)
 	var anchor daos.Anchor
 	for !anchor.EOF() {
-		keys, err := oh.DistKeys(daos.EpochMax, &anchor)
+		ki, err := n.withReadHandle(func(oh *LockableObjectHandle) (interface{}, error) {
+			keys, err := oh.DistKeys(daos.EpochMax, &anchor)
+			return keys, errors.Wrapf(err, "Failed to fetch dkeys for %s", n.oid)
+		})
 		if err != nil {
 			return nil, errors.Wrapf(err, "Failed to fetch dkeys for %s", n.oid)
 		}
+		keys := ki.([][]byte)
 		debug.Printf("fetched %d keys for %s @ epoch %d", len(keys), n.oid, daos.EpochMax)
 
 		chunk := make([]*DirEntry, 0, len(keys))
@@ -396,16 +401,12 @@ func (n *Node) destroyChild(child *Node) error {
 		tx(epoch)
 	}()
 
-	oh, err := child.oh()
+	err = child.withWriteHandle(func(oh *LockableObjectHandle) error {
+		return errors.Wrapf(oh.Punch(epoch),
+			"Object punch failed on %s", child.oid)
+	})
 	if err != nil {
 		return err
-	}
-	oh.Lock()
-	defer oh.Unlock()
-
-	// Apparently Punch() is not implemented yet...
-	if err := oh.Punch(epoch); err != nil {
-		return errors.Wrapf(err, "Object punch failed on %s", child.oid)
 	}
 
 	tx = n.fs.ch.EpochCommit

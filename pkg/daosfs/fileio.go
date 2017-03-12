@@ -65,7 +65,7 @@ func (fh *FileHandle) Write(offset int64, data []byte) (int64, error) {
 
 	tx = fh.node.fs.ch.EpochCommit
 
-	return int64(len(data)), fh.node.withHandle(func(oh *LockableObjectHandle) error {
+	return int64(len(data)), fh.node.withWriteHandle(func(oh *LockableObjectHandle) error {
 		return oh.Update(epoch, []byte("."), keys)
 	})
 }
