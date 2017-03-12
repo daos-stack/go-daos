@@ -2,7 +2,6 @@ package daosfs
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"os"
 	"syscall"
@@ -55,7 +54,7 @@ type Node struct {
 
 type DirEntry struct {
 	Name string
-	Oid  daos.ObjectID
+	Oid  *daos.ObjectID
 	Type os.FileMode
 }
 
@@ -118,11 +117,10 @@ func (n *Node) fetchEntry(name string) (*DirEntry, error) {
 	var dentry DirEntry
 	dentry.Name = name
 
+	dentry.Oid = &daos.ObjectID{}
 	if rawOID, ok := kv["OID"]; ok {
-		// FIXME: Figure out how to bypass marshaling
-		//oid := daos.ObjectID(rawOID)
-		if err := json.Unmarshal(rawOID, &dentry.Oid); err != nil {
-			return nil, errors.Wrapf(err, "Failed to unmarshal %q", rawOID)
+		if err := dentry.Oid.UnmarshalBinary(rawOID); err != nil {
+			return nil, errors.Wrapf(err, "Failed to unmarshal %v", rawOID)
 		}
 	} else {
 		return nil, errors.Errorf("Failed to fetch OID attr for %s", name)
@@ -140,8 +138,7 @@ func (n *Node) fetchEntry(name string) (*DirEntry, error) {
 func (n *Node) writeEntry(epoch daos.Epoch, name string, dentry *DirEntry) error {
 	kv := make(map[string][]byte)
 
-	// FIXME: Don't marshal
-	buf, err := json.Marshal(&dentry.Oid)
+	buf, err := dentry.Oid.MarshalBinary()
 	if err != nil {
 		return errors.Wrapf(err, "Can't marshal %s", dentry.Oid)
 	}
@@ -299,7 +296,7 @@ func (n *Node) Lookup(name string) (*Node, error) {
 	}
 	debug.Printf("%s: entry %#v", name, entry)
 	child := Node{
-		oid:      &entry.Oid,
+		oid:      entry.Oid,
 		parent:   n.oid,
 		fs:       n.fs,
 		modeType: entry.Type,
@@ -338,7 +335,7 @@ func (n *Node) createChild(uid, gid uint32, mode os.FileMode, name string) (*Nod
 		return nil, errors.Wrap(err, "Failed to get next OID in Mkdir")
 	}
 
-	err = n.writeEntry(epoch, name, &DirEntry{name, *nextOID, os.FileMode(mode & os.ModeType)})
+	err = n.writeEntry(epoch, name, &DirEntry{name, nextOID, os.FileMode(mode & os.ModeType)})
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to write entry")
 	}

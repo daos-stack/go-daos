@@ -594,6 +594,70 @@ func (o *ObjectID) Class() OClassID {
 	return OClassID(c)
 }
 
+const oidBinaryVersion byte = 1
+
+// MarshalBinary implements the encoding.BinaryMarshaler interface
+func (o *ObjectID) MarshalBinary() ([]byte, error) {
+	return []byte{
+		oidBinaryVersion,
+		byte(o.hi >> 56),
+		byte(o.hi >> 48),
+		byte(o.hi >> 40),
+		byte(o.hi >> 32),
+		byte(o.hi >> 24),
+		byte(o.hi >> 16),
+		byte(o.hi >> 8),
+		byte(o.hi),
+		byte(o.mid >> 56),
+		byte(o.mid >> 48),
+		byte(o.mid >> 40),
+		byte(o.mid >> 32),
+		byte(o.mid >> 24),
+		byte(o.mid >> 16),
+		byte(o.mid >> 8),
+		byte(o.mid),
+		byte(o.lo >> 56),
+		byte(o.lo >> 48),
+		byte(o.lo >> 40),
+		byte(o.lo >> 32),
+		byte(o.lo >> 24),
+		byte(o.lo >> 16),
+		byte(o.lo >> 8),
+		byte(o.lo),
+	}, nil
+}
+
+// UnmarshalBinary implements the encoding.BinaryUnmarshaler interface
+func (o *ObjectID) UnmarshalBinary(data []byte) error {
+	buf := data
+	if len(buf) == 0 {
+		return errors.Errorf("ObjectID.UnmarshalBinary: no data")
+	}
+
+	if buf[0] != oidBinaryVersion {
+		return errors.Errorf("ObjectID.UnmarshalBinary: unsupported version")
+	}
+
+	if len(buf) != /*version*/ 1+ /*hi+mid+lo*/ 24 {
+		return errors.Errorf("ObjectID.UnmarshalBinary: invalid length")
+	}
+
+	buf = buf[1:]
+	o.hi = C.uint64_t(buf[7]) | C.uint64_t(buf[6])<<8 | C.uint64_t(buf[5])<<16 |
+		C.uint64_t(buf[4])<<24 | C.uint64_t(buf[3])<<32 | C.uint64_t(buf[2])<<40 |
+		C.uint64_t(buf[1])<<48 | C.uint64_t(buf[0])<<56
+	buf = buf[8:]
+	o.mid = C.uint64_t(buf[7]) | C.uint64_t(buf[6])<<8 | C.uint64_t(buf[5])<<16 |
+		C.uint64_t(buf[4])<<24 | C.uint64_t(buf[3])<<32 | C.uint64_t(buf[2])<<40 |
+		C.uint64_t(buf[1])<<48 | C.uint64_t(buf[0])<<56
+	buf = buf[8:]
+	o.lo = C.uint64_t(buf[7]) | C.uint64_t(buf[6])<<8 | C.uint64_t(buf[5])<<16 |
+		C.uint64_t(buf[4])<<24 | C.uint64_t(buf[3])<<32 | C.uint64_t(buf[2])<<40 |
+		C.uint64_t(buf[1])<<48 | C.uint64_t(buf[0])<<56
+
+	return nil
+}
+
 func (o *ObjectID) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + o.String() + `"`), nil
 }
