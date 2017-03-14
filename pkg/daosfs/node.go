@@ -18,8 +18,8 @@ type Attr struct {
 	Size  uint64
 	Mtime time.Time
 	Mode  os.FileMode
-	Uid   uint32
-	Gid   uint32
+	Uid   uint32 // nolint
+	Gid   uint32 // nolint
 	// TODO: Implement other fields as necessary
 }
 
@@ -27,16 +27,16 @@ type Attr struct {
 
 // MkdirRequest contains the information needed to complete a mkdir() request
 type MkdirRequest struct {
-	Uid  uint32
-	Gid  uint32
+	Uid  uint32 // nolint
+	Gid  uint32 // nolint
 	Name string
 	Mode os.FileMode
 }
 
 // CreateRequest contains the information needed to complete a create() request
 type CreateRequest struct {
-	Uid   uint32
-	Gid   uint32
+	Uid   uint32 // nolint
+	Gid   uint32 // nolint
 	Flags uint32
 	Name  string
 	Mode  os.FileMode
@@ -52,6 +52,7 @@ type Node struct {
 	Name string
 }
 
+// DirEntry holds information about the child of a directory Node
 type DirEntry struct {
 	Name string
 	Oid  *daos.ObjectID
