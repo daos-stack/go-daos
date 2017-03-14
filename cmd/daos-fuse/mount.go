@@ -43,9 +43,5 @@ func mount(group, pool, name, mountpoint string) error {
 	}
 
 	<-c.Ready
-	if err := c.MountError; err != nil {
-		return err
-	}
-
-	return nil
+	return c.MountError // should be nil
 }

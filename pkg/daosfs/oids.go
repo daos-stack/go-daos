@@ -19,7 +19,6 @@ type oidGenerator struct {
 
 	fs *DaosFileSystem
 
-	first   uint64
 	last    uint64
 	current uint64
 }

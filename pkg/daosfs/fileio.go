@@ -53,7 +53,7 @@ func (fh *FileHandle) Write(offset int64, data []byte) (int64, error) {
 
 	keys = append(keys, daos.NewKeyRequest([]byte("Size")))
 	buf := make([]byte, 8)
-	binary.LittleEndian.PutUint64(buf, uint64(curSize+uint64(len(data))))
+	binary.LittleEndian.PutUint64(buf, curSize+uint64(len(data)))
 	keys[1].Put(0, 1, 8, buf)
 
 	mtime, err := time.Now().MarshalBinary()

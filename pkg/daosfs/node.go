@@ -29,8 +29,8 @@ type Attr struct {
 type MkdirRequest struct {
 	Uid  uint32 // nolint
 	Gid  uint32 // nolint
-	Name string
 	Mode os.FileMode
+	Name string
 }
 
 // CreateRequest contains the information needed to complete a create() request
@@ -38,8 +38,8 @@ type CreateRequest struct {
 	Uid   uint32 // nolint
 	Gid   uint32 // nolint
 	Flags uint32
-	Name  string
 	Mode  os.FileMode
+	Name  string
 }
 
 // Node represents a file or directory stored in DAOS
@@ -215,7 +215,7 @@ func (n *Node) Attr() (*Attr, error) {
 
 	for key := range kv {
 		val := kv[key]
-		switch string(key) {
+		switch key {
 		case "Size":
 			da.Size = binary.LittleEndian.Uint64(val)
 		case "Mtime":
@@ -341,7 +341,7 @@ func (n *Node) createChild(uid, gid uint32, mode os.FileMode, name string) (*Nod
 		return nil, errors.Wrap(err, "Failed to get next OID in Mkdir")
 	}
 
-	err = n.writeEntry(epoch, name, &DirEntry{name, nextOID, os.FileMode(mode & os.ModeType)})
+	err = n.writeEntry(epoch, name, &DirEntry{name, nextOID, mode & os.ModeType})
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to write entry")
 	}
@@ -358,7 +358,7 @@ func (n *Node) createChild(uid, gid uint32, mode os.FileMode, name string) (*Nod
 	debug.Printf("Created new child object %s", child)
 
 	attr := &Attr{
-		Mode:  os.FileMode(mode),
+		Mode:  mode,
 		Uid:   uid,
 		Gid:   gid,
 		Mtime: time.Now(),

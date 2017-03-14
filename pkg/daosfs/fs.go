@@ -98,7 +98,9 @@ func NewDaosFileSystem(group, pool, container string) (*DaosFileSystem, error) {
 	}
 
 	if created {
-		_, err = dfs.DeclareObject(dfs.root.oid, daos.ClassTinyRW)
+		if _, err = dfs.DeclareObject(dfs.root.oid, daos.ClassTinyRW); err != nil {
+			return nil, err
+		}
 		rootAttr := &Attr{
 			Mode:  os.ModeDir | 0755,
 			Uid:   uint32(os.Getuid()),
@@ -138,7 +140,7 @@ func (dfs *DaosFileSystem) OpenObjectEpoch(oid *daos.ObjectID, epoch daos.Epoch)
 	// does that even mean? Does it matter if a handle is opened at
 	// epoch N and then some update happens at N+2 (or N-3)?
 	if oh, ok := dfs.hc.Get(oid); ok {
-		debug.Printf("Retrieved handle for %s from cache in %s", oid, time.Now().Sub(start))
+		debug.Printf("Retrieved handle for %s from cache in %s", oid, time.Since(start))
 		return oh.(*LockableObjectHandle), nil
 	}
 
@@ -146,7 +148,7 @@ func (dfs *DaosFileSystem) OpenObjectEpoch(oid *daos.ObjectID, epoch daos.Epoch)
 	if err != nil {
 		return nil, errors.Wrapf(err, "Failed to open %s @ %s", oid, epoch)
 	}
-	debug.Printf("Opened handle for %s in %s", oid, time.Now().Sub(start))
+	debug.Printf("Opened handle for %s in %s", oid, time.Since(start))
 
 	loh := &LockableObjectHandle{
 		sync.RWMutex{},
@@ -217,6 +219,6 @@ func (dfs *DaosFileSystem) Fini() error {
 	dfs.hc.Purge()
 	dfs.ch.Close()
 	dfs.uh.Close()
-	debug.Printf("Shutdown took %s", time.Now().Sub(start))
+	debug.Printf("Shutdown took %s", time.Since(start))
 	return nil
 }
