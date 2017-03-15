@@ -186,14 +186,16 @@ func (c *TwoQueueCache) Keys() []interface{} {
 }
 
 func (c *TwoQueueCache) Remove(key interface{}) {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-
 	if c.ecb != nil {
 		if val, found := c.Get(key); found && val != nil {
+			c.lock.Lock()
 			c.ecb(key, val)
+			c.lock.Unlock()
 		}
 	}
+
+	c.lock.Lock()
+	defer c.lock.Unlock()
 
 	if c.frequent.Remove(key) {
 		return
