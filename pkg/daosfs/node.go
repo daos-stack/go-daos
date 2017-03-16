@@ -4,8 +4,10 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
-	"syscall"
+	"strconv"
 	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/daos-stack/go-daos/pkg/daos"
 	"github.com/intel-hpdd/logging/debug"
@@ -44,12 +46,12 @@ type CreateRequest struct {
 
 // Node represents a file or directory stored in DAOS
 type Node struct {
-	fs       *DaosFileSystem
-	oid      *daos.ObjectID
-	parent   *daos.ObjectID
-	modeType os.FileMode
-
-	Name string
+	fs        *DaosFileSystem
+	oid       *daos.ObjectID
+	parent    *daos.ObjectID
+	modeType  os.FileMode
+	readEpoch *daos.Epoch
+	Name      string
 }
 
 // DirEntry holds information about the child of a directory Node
@@ -71,6 +73,9 @@ func (n *Node) oh() (*LockableObjectHandle, error) {
 }
 
 func (n *Node) withWriteHandle(fn func(oh *LockableObjectHandle) error) error {
+	if n.IsSnapshot() {
+		return unix.EPERM
+	}
 	oh, err := n.oh()
 	if err != nil {
 		return err
@@ -105,7 +110,15 @@ func (n *Node) getSize() (uint64, error) {
 	return size.(uint64), err
 }
 
+// IsSnapshot is true if the Node refers to snapshot version of a object
+func (n *Node) IsSnapshot() bool {
+	return n.readEpoch != nil
+}
+
 func (n *Node) currentEpoch() daos.Epoch {
+	if n.readEpoch != nil {
+		return *n.readEpoch
+	}
 	return daos.EpochMax
 }
 
@@ -234,6 +247,55 @@ func (n *Node) Attr() (*Attr, error) {
 	return da, nil
 }
 
+func (n *Node) Getxattr(name string) ([]byte, error) {
+	debug.Printf("getxattr %s[%s]", n.Name, name)
+	switch name {
+	case "user.snapshot_epoch":
+		if n.readEpoch != nil {
+			s := fmt.Sprintf("%d", *n.readEpoch)
+			debug.Printf("epoch %s %d %s", n.Name, *n.readEpoch, s)
+			return []byte(s), nil
+		}
+	}
+	return nil, ErrNoXattr
+}
+
+func (n *Node) Listxattr() ([]string, error) {
+	var attrs []string
+	if n.readEpoch != nil {
+		debug.Printf("listxattr %s[%s]", n.Name)
+		attrs = append(attrs, "user.snapshot_epoch")
+	}
+	return attrs, nil
+}
+
+func (n *Node) Setxattr(name string, value []byte, flags uint32) error {
+	debug.Printf("setxattr %s[%s] =  %s", n.Name, name, value)
+	switch name {
+	case "user.snapshot_epoch":
+		e, err := strconv.ParseUint(string(value), 0, 64)
+		if err != nil {
+			return errors.Wrap(err, "parse number")
+		}
+		n.readEpoch = (*daos.Epoch)(&e)
+	default:
+		return unix.ENOSYS
+	}
+	return nil
+}
+
+func (n *Node) Removexattr(name string) error {
+	debug.Printf("remove xattr %s[%s])", n.Name, name)
+
+	switch name {
+	case "user.snapshot_epoch":
+		n.readEpoch = nil
+	default:
+		return ErrNoXattr
+	}
+	return nil
+}
+
 func (n *Node) String() string {
 	return fmt.Sprintf("oid: %s, parent: %s, name: %s", n.oid, n.parent, n.Name)
 }
@@ -302,11 +364,12 @@ func (n *Node) Lookup(name string) (*Node, error) {
 	}
 	debug.Printf("%s: entry %#v", name, entry)
 	child := Node{
-		oid:      entry.Oid,
-		parent:   n.oid,
-		fs:       n.fs,
-		modeType: entry.Type,
-		Name:     name,
+		oid:       entry.Oid,
+		parent:    n.oid,
+		fs:        n.fs,
+		modeType:  entry.Type,
+		readEpoch: n.readEpoch,
+		Name:      name,
 	}
 
 	return &child, nil
@@ -315,7 +378,7 @@ func (n *Node) Lookup(name string) (*Node, error) {
 func (n *Node) createChild(uid, gid uint32, mode os.FileMode, name string) (*Node, error) {
 	if child, _ := n.Lookup(name); child != nil {
 		debug.Printf("In Mkdir(): %s already exists!", name)
-		return nil, syscall.EEXIST
+		return nil, unix.EEXIST
 	}
 	debug.Printf("Creating %s/%s", n.Name, name)
 
@@ -427,18 +490,18 @@ func (n *Node) Remove(name string, dir bool) error {
 	switch child.Type() {
 	case os.ModeDir:
 		if !dir {
-			return syscall.EISDIR
+			return unix.EISDIR
 		}
 		children, err := child.Children()
 		if err != nil {
 			return err
 		}
 		if len(children) != 0 {
-			return syscall.ENOTEMPTY
+			return unix.ENOTEMPTY
 		}
 	default:
 		if dir {
-			return syscall.ENOTDIR
+			return unix.ENOTDIR
 		}
 	}
 

@@ -5,6 +5,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/daos-stack/go-daos/pkg/daos"
 	"github.com/intel-hpdd/logging/debug"
 	"github.com/pkg/errors"
@@ -26,6 +28,9 @@ func NewFileHandle(node *Node, flags uint32) *FileHandle {
 }
 
 func (fh *FileHandle) Write(offset int64, data []byte) (int64, error) {
+	if fh.node.IsSnapshot() {
+		return 0, unix.EPERM
+	}
 	var curSize uint64
 	if fh.Flags&syscall.O_APPEND > 0 {
 		var err error
