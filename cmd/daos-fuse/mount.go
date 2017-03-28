@@ -10,7 +10,7 @@ import (
 )
 
 func mount(group, pool, name, mountpoint string) error {
-	dfs, err := daosfs.NewDaosFileSystem(group, pool, name)
+	dfs, err := daosfs.NewFileSystem(group, pool, name)
 	if err != nil {
 		return err
 	}

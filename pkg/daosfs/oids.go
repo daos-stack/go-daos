@@ -17,13 +17,13 @@ const (
 type oidGenerator struct {
 	sync.Mutex
 
-	fs *DaosFileSystem
+	fs *FileSystem
 
 	last    uint64
 	current uint64
 }
 
-func newOidGenerator(fs *DaosFileSystem) *oidGenerator {
+func newOidGenerator(fs *FileSystem) *oidGenerator {
 	return &oidGenerator{
 		fs:      fs,
 		current: 1,
@@ -34,7 +34,7 @@ func (g *oidGenerator) getNextBatch() error {
 	/* FIXME: This stuff is still racy for multiple client mounts.
 	 * Need to understand epochs better and see if we can figure out
 	 * a way to guarantee that each batch is only used by a single
-	 * DaosFileSystem process.
+	 * FileSystem process.
 	 */
 	debug.Print("getting next batch of OIDs")
 	epoch, err := g.fs.ch.EpochHold(0)

@@ -28,8 +28,8 @@ type LockableObjectHandle struct {
 	daos.ObjectHandle
 }
 
-// DaosFileSystem provides a filesystem-like interface to DAOS
-type DaosFileSystem struct {
+// FileSystem provides a filesystem-like interface to DAOS
+type FileSystem struct {
 	Name string
 	root *Node
 	uh   *ufd.Handle
@@ -38,9 +38,9 @@ type DaosFileSystem struct {
 	hc   *lru.TwoQueueCache
 }
 
-// NewDaosFileSystem connects to the given pool and creates a container
+// NewFileSystem connects to the given pool and creates a container
 // for the given filesystem name
-func NewDaosFileSystem(group, pool, container string) (*DaosFileSystem, error) {
+func NewFileSystem(group, pool, container string) (*FileSystem, error) {
 	debug.Printf("Connecting to %s (group: %q)", pool, group)
 	uh, err := ufd.Connect(group, pool)
 	if err != nil {
@@ -48,7 +48,7 @@ func NewDaosFileSystem(group, pool, container string) (*DaosFileSystem, error) {
 	}
 	debug.Printf("Connected to %s", pool)
 
-	dfs := &DaosFileSystem{
+	fs := &FileSystem{
 		Name: container,
 		uh:   uh,
 		root: &Node{
@@ -58,10 +58,10 @@ func NewDaosFileSystem(group, pool, container string) (*DaosFileSystem, error) {
 			Name:     "/",
 		},
 	}
-	dfs.root.fs = dfs
-	dfs.og = newOidGenerator(dfs)
+	fs.root.fs = fs
+	fs.og = newOidGenerator(fs)
 
-	dfs.hc, err = lru.New2QEvict(
+	fs.hc, err = lru.New2QEvict(
 		HandleCacheSize,
 		// Close the object on eviction from the cache
 		func(key, value interface{}) {
@@ -77,28 +77,28 @@ func NewDaosFileSystem(group, pool, container string) (*DaosFileSystem, error) {
 	}
 
 	var created bool
-	debug.Printf("Opening filesystem container %q", dfs.Name)
-	ch, err := dfs.uh.OpenContainer(dfs.Name, daos.ContOpenRW)
+	debug.Printf("Opening filesystem container %q", fs.Name)
+	ch, err := fs.uh.OpenContainer(fs.Name, daos.ContOpenRW)
 	if err != nil {
-		debug.Printf("Error opening %q: %s; attempting to create it.", dfs.Name, err)
-		if err = dfs.uh.NewContainer(dfs.Name, ""); err != nil {
-			return nil, errors.Wrapf(err, "Failed to create container %q", dfs.Name)
+		debug.Printf("Error opening %q: %s; attempting to create it.", fs.Name, err)
+		if err = fs.uh.NewContainer(fs.Name, ""); err != nil {
+			return nil, errors.Wrapf(err, "Failed to create container %q", fs.Name)
 		}
 		created = true
-		if ch, err = dfs.uh.OpenContainer(dfs.Name, daos.ContOpenRW); err != nil {
-			return nil, errors.Wrapf(err, "Failed to open container %q after create", dfs.Name)
+		if ch, err = fs.uh.OpenContainer(fs.Name, daos.ContOpenRW); err != nil {
+			return nil, errors.Wrapf(err, "Failed to open container %q after create", fs.Name)
 		}
-		debug.Printf("Created container for %q", dfs.Name)
+		debug.Printf("Created container for %q", fs.Name)
 	}
-	dfs.ch = ch
+	fs.ch = ch
 
-	epoch, err := dfs.CurrentEpoch()
+	epoch, err := fs.CurrentEpoch()
 	if err != nil {
 		return nil, err
 	}
 
 	if created {
-		if _, err = dfs.DeclareObject(dfs.root.oid, daos.ClassTinyRW); err != nil {
+		if _, err = fs.DeclareObject(fs.root.oid, daos.ClassTinyRW); err != nil {
 			return nil, err
 		}
 		rootAttr := &Attr{
@@ -107,24 +107,24 @@ func NewDaosFileSystem(group, pool, container string) (*DaosFileSystem, error) {
 			Gid:   uint32(os.Getgid()),
 			Mtime: time.Now(),
 		}
-		err = dfs.root.writeAttr(epoch, rootAttr)
+		err = fs.root.writeAttr(epoch, rootAttr)
 	} else {
-		_, err = dfs.OpenObject(dfs.root.oid)
+		_, err = fs.OpenObject(fs.root.oid)
 	}
 
-	return dfs, err
+	return fs, err
 }
 
 // NextEpoch queries the current highest committed epoch and returns
 // that + 1
-func (dfs *DaosFileSystem) NextEpoch() (daos.Epoch, error) {
-	cur, err := dfs.CurrentEpoch()
+func (fs *FileSystem) NextEpoch() (daos.Epoch, error) {
+	cur, err := fs.CurrentEpoch()
 	return cur + 1, err
 }
 
 // CurrentEpoch queries the current highest committed epoch
-func (dfs *DaosFileSystem) CurrentEpoch() (daos.Epoch, error) {
-	s, err := dfs.ch.EpochQuery()
+func (fs *FileSystem) CurrentEpoch() (daos.Epoch, error) {
+	s, err := fs.ch.EpochQuery()
 	if err != nil {
 		return 0, errors.Wrap(err, "Epoch query failed")
 	}
@@ -134,17 +134,17 @@ func (dfs *DaosFileSystem) CurrentEpoch() (daos.Epoch, error) {
 
 // OpenObjectEpoch returns an open *daos.ObjectHandle for the given oid
 // and epoch
-func (dfs *DaosFileSystem) OpenObjectEpoch(oid *daos.ObjectID, epoch daos.Epoch) (*LockableObjectHandle, error) {
+func (fs *FileSystem) OpenObjectEpoch(oid *daos.ObjectID, epoch daos.Epoch) (*LockableObjectHandle, error) {
 	start := time.Now()
 	// TODO: Do we need to cache handles opened at different epochs? What
 	// does that even mean? Does it matter if a handle is opened at
 	// epoch N and then some update happens at N+2 (or N-3)?
-	if oh, ok := dfs.hc.Get(oid); ok {
+	if oh, ok := fs.hc.Get(oid); ok {
 		debug.Printf("Retrieved handle for %s from cache in %s", oid, time.Since(start))
 		return oh.(*LockableObjectHandle), nil
 	}
 
-	oh, err := dfs.ch.ObjectOpen(oid, epoch, daos.ObjOpenRW)
+	oh, err := fs.ch.ObjectOpen(oid, epoch, daos.ObjOpenRW)
 	if err != nil {
 		return nil, errors.Wrapf(err, "Failed to open %s @ %s", oid, epoch)
 	}
@@ -155,24 +155,24 @@ func (dfs *DaosFileSystem) OpenObjectEpoch(oid *daos.ObjectID, epoch daos.Epoch)
 		*oh,
 	}
 
-	dfs.hc.Add(oid, loh)
+	fs.hc.Add(oid, loh)
 	return loh, nil
 }
 
 // OpenObject returns an open *daos.ObjectHandle for the given oid
 // and current epoch
-func (dfs *DaosFileSystem) OpenObject(oid *daos.ObjectID) (*LockableObjectHandle, error) {
-	epoch, err := dfs.CurrentEpoch()
+func (fs *FileSystem) OpenObject(oid *daos.ObjectID) (*LockableObjectHandle, error) {
+	epoch, err := fs.CurrentEpoch()
 	if err != nil {
 		return nil, err
 	}
 
-	return dfs.OpenObjectEpoch(oid, epoch)
+	return fs.OpenObjectEpoch(oid, epoch)
 }
 
 // DeclareObjectEpoch first declares an object, then opens it and returns
 // an open *daos.ObjectHandle for the given oid and epoch
-func (dfs *DaosFileSystem) DeclareObjectEpoch(oid *daos.ObjectID, epoch daos.Epoch, oc daos.OClassID) (*LockableObjectHandle, error) {
+func (fs *FileSystem) DeclareObjectEpoch(oid *daos.ObjectID, epoch daos.Epoch, oc daos.OClassID) (*LockableObjectHandle, error) {
 	// The C API accepts an optional daos_obj_attr_t value, which at
 	// the moment is just an object class and a rank affinity. The
 	// rank affinity member may go away eventually. The object class
@@ -184,41 +184,41 @@ func (dfs *DaosFileSystem) DeclareObjectEpoch(oid *daos.ObjectID, epoch daos.Epo
 
 	// NB: This is currently a noop in DAOS, but we should be doing it
 	// to be future-proof.
-	if err := dfs.ch.ObjectDeclare(oid, epoch, nil); err != nil {
+	if err := fs.ch.ObjectDeclare(oid, epoch, nil); err != nil {
 		return nil, err
 	}
 
-	return dfs.OpenObjectEpoch(oid, epoch)
+	return fs.OpenObjectEpoch(oid, epoch)
 }
 
 // DeclareObject first declares an object, then opens it and returns
 // an open *daos.ObjectHandle for the given oid and current epoch
-func (dfs *DaosFileSystem) DeclareObject(oid *daos.ObjectID, oc daos.OClassID) (*LockableObjectHandle, error) {
-	epoch, err := dfs.CurrentEpoch()
+func (fs *FileSystem) DeclareObject(oid *daos.ObjectID, oc daos.OClassID) (*LockableObjectHandle, error) {
+	epoch, err := fs.CurrentEpoch()
 	if err != nil {
 		return nil, err
 	}
 
-	return dfs.DeclareObjectEpoch(oid, epoch, oc)
+	return fs.DeclareObjectEpoch(oid, epoch, oc)
 }
 
 // CloseObject removes the object handle from cache and closes it
-func (dfs *DaosFileSystem) CloseObject(oid *daos.ObjectID) {
+func (fs *FileSystem) CloseObject(oid *daos.ObjectID) {
 	// handle is closed via evict callback
-	dfs.hc.Remove(oid)
+	fs.hc.Remove(oid)
 }
 
 // Root returns the root node
-func (dfs *DaosFileSystem) Root() *Node {
-	return dfs.root
+func (fs *FileSystem) Root() *Node {
+	return fs.root
 }
 
 // Fini shuts everything down
-func (dfs *DaosFileSystem) Fini() error {
+func (fs *FileSystem) Fini() error {
 	start := time.Now()
-	dfs.hc.Purge()
-	dfs.ch.Close()
-	dfs.uh.Close()
+	fs.hc.Purge()
+	fs.ch.Close()
+	fs.uh.Close()
 	debug.Printf("Shutdown took %s", time.Since(start))
 	return nil
 }

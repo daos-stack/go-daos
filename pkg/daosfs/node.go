@@ -46,7 +46,7 @@ type CreateRequest struct {
 
 // Node represents a file or directory stored in DAOS
 type Node struct {
-	fs        *DaosFileSystem
+	fs        *FileSystem
 	oid       *daos.ObjectID
 	parent    *daos.ObjectID
 	modeType  os.FileMode

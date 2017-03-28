@@ -7,7 +7,7 @@ import (
 
 // FS implements the fuse Filesystem interfaces
 type FS struct {
-	dfs  *daosfs.DaosFileSystem
+	dfs  *daosfs.FileSystem
 	root fs.Node
 }
 
