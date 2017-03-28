@@ -36,6 +36,7 @@ type FileSystem struct {
 	ch   *daos.ContHandle
 	og   *oidGenerator
 	hc   *lru.TwoQueueCache
+	em   *epochManager
 }
 
 // NewFileSystem connects to the given pool and creates a container
@@ -92,7 +93,7 @@ func NewFileSystem(group, pool, container string) (*FileSystem, error) {
 	}
 	fs.ch = ch
 
-	epoch, err := fs.CurrentEpoch()
+	fs.em, err = newEpochManager(ch)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +108,9 @@ func NewFileSystem(group, pool, container string) (*FileSystem, error) {
 			Gid:   uint32(os.Getgid()),
 			Mtime: time.Now(),
 		}
-		err = fs.root.writeAttr(epoch, rootAttr)
+		err = fs.em.withCommit(func(e daos.Epoch) error {
+			return fs.root.writeAttr(e, rootAttr)
+		})
 	} else {
 		_, err = fs.OpenObject(fs.root.oid)
 	}
@@ -115,21 +118,36 @@ func NewFileSystem(group, pool, container string) (*FileSystem, error) {
 	return fs, err
 }
 
-// NextEpoch queries the current highest committed epoch and returns
-// that + 1
-func (fs *FileSystem) NextEpoch() (daos.Epoch, error) {
-	cur, err := fs.CurrentEpoch()
-	return cur + 1, err
+// GetWriteEpoch returns an epoch that hasn't been committed yet as
+// far as we know at this time. We can guarantee that the epoch won't
+// be committed by this process until ReleaseEpoch() is called, but we
+// can't guarantee that the epoch wasn't committed by another process.
+func (fs *FileSystem) GetWriteEpoch() (daos.Epoch, error) {
+	return fs.em.GetWriteEpoch()
 }
 
-// CurrentEpoch queries the current highest committed epoch
-func (fs *FileSystem) CurrentEpoch() (daos.Epoch, error) {
-	s, err := fs.ch.EpochQuery()
-	if err != nil {
-		return 0, errors.Wrap(err, "Epoch query failed")
-	}
+// GetReadEpoch always returns an epoch that is less than or equal to
+// GHCE. As a result, reads at this epoch are guaranteed to be consistent,
+// but may not contain the latest data.
+func (fs *FileSystem) GetReadEpoch() daos.Epoch {
+	return fs.em.GetReadEpoch()
+}
 
-	return s.HCE(), nil
+// ReleaseEpoch attempts to commit any changes at the given epoch -- in
+// addition to any changes made at earlier epochs which have been fully
+// released but have not yet been committed to DAOS. If the given epoch
+// is the lowest or only held epoch known by this process, then the epoch
+// will be committed immediately. Otherwise, the epoch will be committed
+// when all lower epochs have been committed.
+func (fs *FileSystem) ReleaseEpoch(e daos.Epoch) error {
+	return fs.em.Commit(e)
+}
+
+// DiscardEpoch will discard any changes made at the given epoch and
+// release it. Any other holders of that epoch will get an error if
+// they attempt to commit their changes.
+func (fs *FileSystem) DiscardEpoch(e daos.Epoch) error {
+	return fs.em.Discard(e)
 }
 
 // OpenObjectEpoch returns an open *daos.ObjectHandle for the given oid
@@ -162,12 +180,7 @@ func (fs *FileSystem) OpenObjectEpoch(oid *daos.ObjectID, epoch daos.Epoch) (*Lo
 // OpenObject returns an open *daos.ObjectHandle for the given oid
 // and current epoch
 func (fs *FileSystem) OpenObject(oid *daos.ObjectID) (*LockableObjectHandle, error) {
-	epoch, err := fs.CurrentEpoch()
-	if err != nil {
-		return nil, err
-	}
-
-	return fs.OpenObjectEpoch(oid, epoch)
+	return fs.OpenObjectEpoch(oid, fs.GetReadEpoch())
 }
 
 // DeclareObjectEpoch first declares an object, then opens it and returns
@@ -194,12 +207,8 @@ func (fs *FileSystem) DeclareObjectEpoch(oid *daos.ObjectID, epoch daos.Epoch, o
 // DeclareObject first declares an object, then opens it and returns
 // an open *daos.ObjectHandle for the given oid and current epoch
 func (fs *FileSystem) DeclareObject(oid *daos.ObjectID, oc daos.OClassID) (*LockableObjectHandle, error) {
-	epoch, err := fs.CurrentEpoch()
-	if err != nil {
-		return nil, err
-	}
-
-	return fs.DeclareObjectEpoch(oid, epoch, oc)
+	// TODO: Does it matter which epoch we declare an object at?
+	return fs.DeclareObjectEpoch(oid, fs.GetReadEpoch(), oc)
 }
 
 // CloseObject removes the object handle from cache and closes it

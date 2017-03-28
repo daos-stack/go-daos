@@ -41,11 +41,11 @@ func (fh *FileHandle) Write(offset int64, data []byte) (int64, error) {
 		offset = int64(curSize)
 	}
 
-	epoch, err := fh.node.fs.ch.EpochHold(0)
+	epoch, err := fh.node.fs.GetWriteEpoch()
 	if err != nil {
-		return 0, errors.Wrap(err, "Unable to hold epoch")
+		return 0, err
 	}
-	tx := fh.node.fs.ch.EpochDiscard
+	tx := fh.node.fs.DiscardEpoch
 	defer func() {
 		tx(epoch)
 	}()
@@ -68,7 +68,7 @@ func (fh *FileHandle) Write(offset int64, data []byte) (int64, error) {
 	keys = append(keys, daos.NewKeyRequest([]byte("Mtime")))
 	keys[2].Put(0, 1, uint64(len(mtime)), mtime)
 
-	tx = fh.node.fs.ch.EpochCommit
+	tx = fh.node.fs.ReleaseEpoch
 
 	return int64(len(data)), fh.node.withWriteHandle(func(oh *LockableObjectHandle) error {
 		return oh.Update(epoch, []byte("."), keys)
@@ -99,7 +99,7 @@ func (fh *FileHandle) Read(offset, size int64, data *[]byte) error {
 	// FIXME: Need to fix the go-daos API in order to give it the data
 	// slice we're given and avoid the copy.
 	keys[0].Get(uint64(offset), uint64(size), 1)
-	if err := oh.Fetch(daos.EpochMax, []byte("."), keys); err != nil {
+	if err := oh.Fetch(fh.node.fs.GetReadEpoch(), []byte("."), keys); err != nil {
 		return err
 	}
 	*data = append(*data, keys[0].Buffers[0]...)

@@ -99,7 +99,7 @@ func (n *Node) withReadHandle(fn func(oh *LockableObjectHandle) (interface{}, er
 
 func (n *Node) getSize() (uint64, error) {
 	size, err := n.withReadHandle(func(oh *LockableObjectHandle) (interface{}, error) {
-		val, err := oh.Get(daos.EpochMax, ".", "Size")
+		val, err := oh.Get(n.fs.GetReadEpoch(), ".", "Size")
 		if err != nil {
 			return 0, errors.Wrapf(err, "Failed to fetch ./Size on %s", n.oid)
 		}
@@ -119,7 +119,7 @@ func (n *Node) currentEpoch() daos.Epoch {
 	if n.readEpoch != nil {
 		return *n.readEpoch
 	}
-	return daos.EpochMax
+	return n.fs.GetReadEpoch()
 }
 
 func (n *Node) fetchEntry(name string) (*DirEntry, error) {
@@ -316,18 +316,19 @@ func (n *Node) Inode() uint64 {
 func (n *Node) Children() ([]*DirEntry, error) {
 	var children []*DirEntry
 
+	epoch := n.currentEpoch()
 	debug.Printf("getting children of %s (%s)", n.oid, n.Name)
 	var anchor daos.Anchor
 	for !anchor.EOF() {
 		ki, err := n.withReadHandle(func(oh *LockableObjectHandle) (interface{}, error) {
-			keys, err := oh.DistKeys(daos.EpochMax, &anchor)
+			keys, err := oh.DistKeys(epoch, &anchor)
 			return keys, errors.Wrapf(err, "Failed to fetch dkeys for %s", n.oid)
 		})
 		if err != nil {
 			return nil, errors.Wrapf(err, "Failed to fetch dkeys for %s", n.oid)
 		}
 		keys := ki.([][]byte)
-		debug.Printf("fetched %d keys for %s @ epoch %d", len(keys), n.oid, daos.EpochMax)
+		debug.Printf("fetched %d keys for %s @ epoch %d", len(keys), n.oid, epoch)
 
 		chunk := make([]*DirEntry, 0, len(keys))
 		for i := range keys {
@@ -382,11 +383,11 @@ func (n *Node) createChild(uid, gid uint32, mode os.FileMode, name string) (*Nod
 	}
 	debug.Printf("Creating %s/%s", n.Name, name)
 
-	epoch, err := n.fs.ch.EpochHold(0)
+	epoch, err := n.fs.GetWriteEpoch()
 	if err != nil {
-		return nil, errors.Wrap(err, "Unable to hold epoch")
+		return nil, err
 	}
-	tx := n.fs.ch.EpochDiscard
+	tx := n.fs.DiscardEpoch
 	defer func() {
 		tx(epoch)
 	}()
@@ -433,7 +434,7 @@ func (n *Node) createChild(uid, gid uint32, mode os.FileMode, name string) (*Nod
 	}
 
 	debug.Printf("Successfully created %s/%s", n.Name, child.Name)
-	tx = n.fs.ch.EpochCommit
+	tx = n.fs.ReleaseEpoch
 
 	return child, nil
 }
@@ -456,11 +457,11 @@ func (n *Node) Open(flags uint32) (*FileHandle, error) {
 }
 
 func (n *Node) destroyChild(child *Node) error {
-	epoch, err := n.fs.ch.EpochHold(0)
+	epoch, err := n.fs.GetWriteEpoch()
 	if err != nil {
-		return errors.Wrap(err, "Unable to hold epoch")
+		return err
 	}
-	tx := n.fs.ch.EpochDiscard
+	tx := n.fs.DiscardEpoch
 	defer func() {
 		tx(epoch)
 	}()
@@ -473,7 +474,7 @@ func (n *Node) destroyChild(child *Node) error {
 		return err
 	}
 
-	tx = n.fs.ch.EpochCommit
+	tx = n.fs.ReleaseEpoch
 
 	// FIXME: This is broken. Need a fix from DAOS so that we can
 	// actually delete a dkey.
