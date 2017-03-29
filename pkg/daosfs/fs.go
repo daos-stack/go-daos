@@ -28,6 +28,39 @@ type LockableObjectHandle struct {
 	daos.ObjectHandle
 }
 
+// WriteTransaction wraps a writable epoch with some transactional
+// logic that will ensure the epoch is discarded or committed when
+// used in a deferred function.
+type WriteTransaction struct {
+	Epoch daos.Epoch
+	Error error
+
+	completed  bool
+	completeFn func(daos.Epoch) error
+	commitFn   func(daos.Epoch) error
+}
+
+// Complete triggers a call to the transaction's complete function.
+func (wt *WriteTransaction) Complete() error {
+	if wt.completed {
+		return errors.New("Complete() called on completed tx")
+	}
+
+	if wt.Error = wt.completeFn(wt.Epoch); wt.Error != nil {
+		debug.Printf("Error in tx.Complete() (epoch %d): %s", wt.Epoch, wt.Error)
+		return errors.Wrap(wt.Error, "Error in tx.Complete()")
+	}
+
+	wt.completed = true
+	return nil
+}
+
+// Commit sets the transaction's complete function to the supplied
+// commit function.
+func (wt *WriteTransaction) Commit() {
+	wt.completeFn = wt.commitFn
+}
+
 // FileSystem provides a filesystem-like interface to DAOS
 type FileSystem struct {
 	Name string
@@ -116,6 +149,23 @@ func NewFileSystem(group, pool, container string) (*FileSystem, error) {
 	}
 
 	return fs, err
+}
+
+// GetWriteTransaction returns a transaction object which contains
+// a writable epoch. It is intended to be used in a deferred function
+// which will ensure that the epoch is discarded or committed when
+// the enclosing function exits.
+func (fs *FileSystem) GetWriteTransaction() (*WriteTransaction, error) {
+	epoch, err := fs.GetWriteEpoch()
+	if err != nil {
+		return nil, err
+	}
+
+	return &WriteTransaction{
+		Epoch:      epoch,
+		completeFn: fs.DiscardEpoch,
+		commitFn:   fs.ReleaseEpoch,
+	}, nil
 }
 
 // GetWriteEpoch returns an epoch that hasn't been committed yet as

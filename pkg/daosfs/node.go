@@ -383,13 +383,12 @@ func (n *Node) createChild(uid, gid uint32, mode os.FileMode, name string) (*Nod
 	}
 	debug.Printf("Creating %s/%s", n.Name, name)
 
-	epoch, err := n.fs.GetWriteEpoch()
+	tx, err := n.fs.GetWriteTransaction()
 	if err != nil {
 		return nil, err
 	}
-	tx := n.fs.DiscardEpoch
 	defer func() {
-		tx(epoch)
+		tx.Complete()
 	}()
 
 	// TODO: We may need to find a better default for non-directory
@@ -405,7 +404,7 @@ func (n *Node) createChild(uid, gid uint32, mode os.FileMode, name string) (*Nod
 		return nil, errors.Wrap(err, "Failed to get next OID in Mkdir")
 	}
 
-	err = n.writeEntry(epoch, name, &DirEntry{name, nextOID, mode & os.ModeType})
+	err = n.writeEntry(tx.Epoch, name, &DirEntry{name, nextOID, mode & os.ModeType})
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to write entry")
 	}
@@ -416,7 +415,7 @@ func (n *Node) createChild(uid, gid uint32, mode os.FileMode, name string) (*Nod
 		fs:     n.fs,
 		Name:   name,
 	}
-	if _, err = n.fs.DeclareObjectEpoch(child.oid, epoch, objClass); err != nil {
+	if _, err = n.fs.DeclareObjectEpoch(child.oid, tx.Epoch, objClass); err != nil {
 		return nil, err
 	}
 	debug.Printf("Created new child object %s", child)
@@ -428,13 +427,13 @@ func (n *Node) createChild(uid, gid uint32, mode os.FileMode, name string) (*Nod
 		Mtime: time.Now(),
 	}
 
-	err = child.writeAttr(epoch, attr)
+	err = child.writeAttr(tx.Epoch, attr)
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to write attributes")
 	}
 
 	debug.Printf("Successfully created %s/%s", n.Name, child.Name)
-	tx = n.fs.ReleaseEpoch
+	tx.Commit()
 
 	return child, nil
 }
@@ -457,24 +456,23 @@ func (n *Node) Open(flags uint32) (*FileHandle, error) {
 }
 
 func (n *Node) destroyChild(child *Node) error {
-	epoch, err := n.fs.GetWriteEpoch()
+	tx, err := n.fs.GetWriteTransaction()
 	if err != nil {
 		return err
 	}
-	tx := n.fs.DiscardEpoch
 	defer func() {
-		tx(epoch)
+		tx.Complete()
 	}()
 
 	err = child.withWriteHandle(func(oh *LockableObjectHandle) error {
-		return errors.Wrapf(oh.Punch(epoch),
+		return errors.Wrapf(oh.Punch(tx.Epoch),
 			"Object punch failed on %s", child.oid)
 	})
 	if err != nil {
 		return err
 	}
 
-	tx = n.fs.ReleaseEpoch
+	tx.Commit()
 
 	// FIXME: This is broken. Need a fix from DAOS so that we can
 	// actually delete a dkey.

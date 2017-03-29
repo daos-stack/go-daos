@@ -41,13 +41,12 @@ func (fh *FileHandle) Write(offset int64, data []byte) (int64, error) {
 		offset = int64(curSize)
 	}
 
-	epoch, err := fh.node.fs.GetWriteEpoch()
+	tx, err := fh.node.fs.GetWriteTransaction()
 	if err != nil {
 		return 0, err
 	}
-	tx := fh.node.fs.DiscardEpoch
 	defer func() {
-		tx(epoch)
+		tx.Complete()
 	}()
 
 	debug.Printf("Writing %d bytes @ offset %d to %s (%s)", len(data), offset, fh.node.oid, fh.node.Name)
@@ -68,10 +67,12 @@ func (fh *FileHandle) Write(offset int64, data []byte) (int64, error) {
 	keys = append(keys, daos.NewKeyRequest([]byte("Mtime")))
 	keys[2].Put(0, 1, uint64(len(mtime)), mtime)
 
-	tx = fh.node.fs.ReleaseEpoch
-
 	return int64(len(data)), fh.node.withWriteHandle(func(oh *LockableObjectHandle) error {
-		return oh.Update(epoch, []byte("."), keys)
+		err := oh.Update(tx.Epoch, []byte("."), keys)
+		if err == nil {
+			tx.Commit()
+		}
+		return err
 	})
 }
 
