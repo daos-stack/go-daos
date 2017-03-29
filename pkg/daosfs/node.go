@@ -17,7 +17,7 @@ import (
 // Attr represents a Node's file attributes
 type Attr struct {
 	Inode uint64 // fuse only handles a uint64
-	Size  uint64
+	Size  int64
 	Mtime time.Time
 	Mode  os.FileMode
 	Uid   uint32 // nolint
@@ -97,7 +97,7 @@ func (n *Node) withReadHandle(fn func(oh *LockableObjectHandle) (interface{}, er
 	return fn(oh)
 }
 
-func (n *Node) getSize() (uint64, error) {
+func (n *Node) getSize() (int64, error) {
 	size, err := n.withReadHandle(func(oh *LockableObjectHandle) (interface{}, error) {
 		val, err := oh.Get(n.fs.GetReadEpoch(), ".", "Size")
 		if err != nil {
@@ -107,7 +107,12 @@ func (n *Node) getSize() (uint64, error) {
 		return binary.LittleEndian.Uint64(val), nil
 	})
 
-	return size.(uint64), err
+	val := size.(uint64)
+	if int64(val) < 0 {
+		return 0, errors.Errorf("%d overflows int64", val)
+	}
+
+	return int64(val), err
 }
 
 // IsSnapshot is true if the Node refers to snapshot version of a object
@@ -192,7 +197,7 @@ func (n *Node) writeAttr(epoch daos.Epoch, attr *Attr) error {
 	kv["Gid"] = buf
 
 	buf = make([]byte, 8)
-	binary.LittleEndian.PutUint64(buf, attr.Size)
+	binary.LittleEndian.PutUint64(buf, uint64(attr.Size))
 	kv["Size"] = buf
 
 	mtime, err := attr.Mtime.MarshalBinary()
@@ -230,7 +235,11 @@ func (n *Node) Attr() (*Attr, error) {
 		val := kv[key]
 		switch key {
 		case "Size":
-			da.Size = binary.LittleEndian.Uint64(val)
+			size := binary.LittleEndian.Uint64(val)
+			if int64(size) < 0 {
+				return nil, errors.Errorf("%d overflows int64", size)
+			}
+			da.Size = int64(size)
 		case "Mtime":
 			if err := da.Mtime.UnmarshalBinary(val); err != nil {
 				return nil, errors.Wrap(err, "Unable to decode Mtime")

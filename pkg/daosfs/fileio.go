@@ -31,14 +31,14 @@ func (fh *FileHandle) Write(offset int64, data []byte) (int64, error) {
 	if fh.node.IsSnapshot() {
 		return 0, unix.EPERM
 	}
-	var curSize uint64
+	var curSize int64
 	if fh.Flags&syscall.O_APPEND > 0 {
 		var err error
 		curSize, err = fh.node.getSize()
 		if err != nil {
 			return 0, err
 		}
-		offset = int64(curSize)
+		offset = curSize
 	}
 
 	tx, err := fh.node.fs.GetWriteTransaction()
@@ -51,59 +51,72 @@ func (fh *FileHandle) Write(offset int64, data []byte) (int64, error) {
 
 	debug.Printf("Writing %d bytes @ offset %d to %s (%s)", len(data), offset, fh.node.oid, fh.node.Name)
 
-	var keys daos.KeyRequests
-	keys = append(keys, daos.NewKeyRequest([]byte("Data")))
-	keys[0].Put(uint64(offset), uint64(len(data)), 1, data)
+	oh, err := fh.node.oh()
+	if err != nil {
+		return 0, err
+	}
+	oh.Lock()
+	defer oh.Unlock()
 
+	// Write the data
+	ar := daos.NewArrayRequest(&daos.BufferedRange{
+		Buffer: data,
+		Length: int64(len(data)),
+		Offset: offset,
+	})
+	oa := daos.NewArray(oh.OH())
+	var total int64
+	if total, err = oa.Write(tx.Epoch, ar); err != nil {
+		return 0, err
+	}
+
+	// Update the metadata
+	var keys []*daos.KeyRequest
 	keys = append(keys, daos.NewKeyRequest([]byte("Size")))
 	buf := make([]byte, 8)
-	binary.LittleEndian.PutUint64(buf, curSize+uint64(len(data)))
-	keys[1].Put(0, 1, 8, buf)
+	binary.LittleEndian.PutUint64(buf, uint64(curSize+int64(len(data))))
+	keys[0].Put(0, 1, 8, buf)
 
 	mtime, err := time.Now().MarshalBinary()
 	if err != nil {
 		return 0, errors.Wrap(err, "Failed to marshal time.Now()")
 	}
 	keys = append(keys, daos.NewKeyRequest([]byte("Mtime")))
-	keys[2].Put(0, 1, uint64(len(mtime)), mtime)
+	keys[1].Put(0, 1, uint64(len(mtime)), mtime)
 
-	return int64(len(data)), fh.node.withWriteHandle(func(oh *LockableObjectHandle) error {
-		err := oh.Update(tx.Epoch, []byte("."), keys)
-		if err == nil {
-			tx.Commit()
-		}
-		return err
-	})
+	if err := oh.Update(tx.Epoch, []byte("."), keys); err != nil {
+		return 0, err
+	}
+
+	tx.Commit()
+	return total, nil
 }
 
-func (fh *FileHandle) Read(offset, size int64, data *[]byte) error {
+func (fh *FileHandle) Read(offset, size int64, data []byte) (int64, error) {
 	actualSize, err := fh.node.getSize()
 	if err != nil {
-		return err
+		return 0, err
 	}
-	if size > int64(actualSize) {
-		size = int64(actualSize)
+	if size > actualSize {
+		size = actualSize
 	}
 
 	debug.Printf("Reading %d bytes @ offset %d from %s (%s)", size, offset, fh.node.oid, fh.node.Name)
 
 	oh, err := fh.node.oh()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	oh.RLock()
 	defer oh.RUnlock()
 
-	var keys daos.KeyRequests
-	keys = append(keys, daos.NewKeyRequest([]byte("Data")))
+	// Read the data
+	ar := daos.NewArrayRequest(&daos.BufferedRange{
+		Buffer: data,
+		Length: size,
+		Offset: offset,
+	})
+	oa := daos.NewArray(oh.OH())
 
-	// FIXME: Need to fix the go-daos API in order to give it the data
-	// slice we're given and avoid the copy.
-	keys[0].Get(uint64(offset), uint64(size), 1)
-	if err := oh.Fetch(fh.node.fs.GetReadEpoch(), []byte("."), keys); err != nil {
-		return err
-	}
-	*data = append(*data, keys[0].Buffers[0]...)
-
-	return nil
+	return oa.Read(fh.node.currentEpoch(), ar)
 }

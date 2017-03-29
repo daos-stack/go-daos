@@ -24,7 +24,7 @@ func (n *Node) Attr(ctx context.Context, attr *fuse.Attr) error {
 	}
 
 	attr.Inode = da.Inode
-	attr.Size = da.Size
+	attr.Size = uint64(da.Size)
 	//attr.Blocks = da.Blocks
 	//attr.Atime = da.Atime
 	attr.Mtime = da.Mtime

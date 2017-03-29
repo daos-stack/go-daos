@@ -28,6 +28,11 @@ type LockableObjectHandle struct {
 	daos.ObjectHandle
 }
 
+// OH returns the wrapped *daos.ObjectHandle
+func (loh *LockableObjectHandle) OH() *daos.ObjectHandle {
+	return &loh.ObjectHandle
+}
+
 // WriteTransaction wraps a writable epoch with some transactional
 // logic that will ensure the epoch is discarded or committed when
 // used in a deferred function.

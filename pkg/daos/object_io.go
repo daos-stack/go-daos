@@ -12,11 +12,21 @@ import (
 )
 
 type (
+	// RequestBuffers is a slice of byte slices
+	RequestBuffers [][]byte
+
+	// RequestBufferSlicer describes an interface which can be implemented
+	// to provide a slice of RequestBuffers
+	RequestBufferSlicer interface {
+		Length() int
+		Buffers() []RequestBuffers
+	}
+
 	// KeyRequest is a list of extents to fetch or update for a specific Attribute key.
 	KeyRequest struct {
 		Attr    []byte
 		Extents []Extent
-		Buffers [][]byte
+		Buffers RequestBuffers
 	}
 
 	// KeyRequests is a slice of *KeyRequest
@@ -29,6 +39,20 @@ type (
 		RecSize uint64
 	}
 )
+
+// Length returns the length of the KeyRequests slice
+func (krs KeyRequests) Length() int {
+	return len(krs)
+}
+
+// Buffers returns a slice of RequestBuffers
+func (krs KeyRequests) Buffers() []RequestBuffers {
+	out := make([]RequestBuffers, len(krs))
+	for i, req := range krs {
+		out[i] = req.Buffers
+	}
+	return out
+}
 
 // NewKeyRequest returns initialized KeyRequest.
 func NewKeyRequest(key []byte) *KeyRequest {
@@ -195,14 +219,14 @@ func (iod IODescriptorSlice) Pointer() *C.daos_vec_iod_t {
 	return (*C.daos_vec_iod_t)(&iod[0])
 }
 
-func InitSGUpdate(reqs KeyRequests) SGListSlice {
-	sg := make([]SGList, len(reqs))
+func InitSGUpdate(s RequestBufferSlicer) SGListSlice {
+	sg := make([]SGList, s.Length())
 
-	for i, req := range reqs {
-		nr := len(req.Buffers)
+	for i, bufs := range s.Buffers() {
+		nr := len(bufs)
 		iovs := allocIOV(nr)
 		iolist := (*[1 << 30]C.daos_iov_t)(unsafe.Pointer(iovs))[:nr:nr]
-		for j, buf := range req.Buffers {
+		for j, buf := range bufs {
 			copyToIov((*IoVec)(&iolist[j]), buf)
 		}
 		sg[i].sg_nr.num = C.uint32_t(nr)
