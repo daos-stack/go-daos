@@ -51,7 +51,7 @@ func (fh *FileHandle) Write(offset int64, data []byte) (int64, error) {
 
 	debug.Printf("Writing %d bytes @ offset %d to %s (%s)", len(data), offset, fh.node.oid, fh.node.Name)
 
-	var keys []*daos.KeyRequest
+	var keys daos.KeyRequests
 	keys = append(keys, daos.NewKeyRequest([]byte("Data")))
 	keys[0].Put(uint64(offset), uint64(len(data)), 1, data)
 
@@ -94,7 +94,7 @@ func (fh *FileHandle) Read(offset, size int64, data *[]byte) error {
 	oh.RLock()
 	defer oh.RUnlock()
 
-	var keys []*daos.KeyRequest
+	var keys daos.KeyRequests
 	keys = append(keys, daos.NewKeyRequest([]byte("Data")))
 
 	// FIXME: Need to fix the go-daos API in order to give it the data

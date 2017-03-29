@@ -939,20 +939,20 @@ func (oh *ObjectHandle) Putb(e Epoch, dkey []byte, akey []byte, value []byte) er
 	kr := NewKeyRequest(akey)
 	kr.Put(0, 1, uint64(len(value)), value)
 
-	return oh.Update(e, dkey, []*KeyRequest{kr})
+	return oh.Update(e, dkey, KeyRequests{kr})
 }
 
 func (oh *ObjectHandle) PutKeys(e Epoch, dkey string, akeys map[string][]byte) error {
-	var request []*KeyRequest
+	var reqs KeyRequests
 
 	for k := range akeys {
 		kr := NewKeyRequest([]byte(k))
 		kr.Put(0, 1, uint64(len(akeys[k])), akeys[k])
-		request = append(request, kr)
+		reqs = append(reqs, kr)
 
 	}
 
-	return oh.Update(e, []byte(dkey), request)
+	return oh.Update(e, []byte(dkey), reqs)
 }
 
 const (
@@ -970,7 +970,7 @@ func (oh *ObjectHandle) Getb(e Epoch, dkey []byte, akey []byte) ([]byte, error) 
 	kr := NewKeyRequest(akey)
 	kr.Get(0, 1, RecAny)
 
-	err := oh.Fetch(e, dkey, []*KeyRequest{kr})
+	err := oh.Fetch(e, dkey, KeyRequests{kr})
 	if err != nil {
 		return nil, err
 	}
@@ -985,24 +985,24 @@ func (oh *ObjectHandle) Getb(e Epoch, dkey []byte, akey []byte) ([]byte, error) 
 // GetKeys returns first record for each a-key available in the specified epoch.
 func (oh *ObjectHandle) GetKeys(e Epoch, dkey string, akeys []string) (map[string][]byte, error) {
 	kv := make(map[string][]byte)
-	var request []*KeyRequest
+	var reqs KeyRequests
 
 	for k := range akeys {
 		kr := NewKeyRequest([]byte(akeys[k]))
 		kr.Get(0, 1, RecAny)
-		request = append(request, kr)
+		reqs = append(reqs, kr)
 
 	}
 
-	err := oh.Inspect(e, []byte(dkey), request)
+	err := oh.Inspect(e, []byte(dkey), reqs)
 	if err != nil {
 		return nil, err
 	}
 
-	var fetch []*KeyRequest
+	var fetch KeyRequests
 
 	// Only fetch akeys that have a size
-	for _, req := range request {
+	for _, req := range reqs {
 		for _, extent := range req.Extents {
 			if extent.RecSize != RecAny {
 				fetch = append(fetch, req)
@@ -1020,7 +1020,7 @@ func (oh *ObjectHandle) GetKeys(e Epoch, dkey string, akeys []string) (map[strin
 		return nil, err
 	}
 
-	for _, kr := range request {
+	for _, kr := range reqs {
 		if len(kr.Buffers) > 0 {
 			kv[string(kr.Attr)] = kr.Buffers[0]
 		}
