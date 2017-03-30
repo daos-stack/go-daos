@@ -94,7 +94,7 @@ func NewFileSystem(group, pool, container string) (*FileSystem, error) {
 			oid:      RootOID,
 			parent:   RootOID,
 			modeType: os.ModeDir,
-			Name:     "/",
+			Name:     "",
 		},
 	}
 	fs.root.fs = fs
