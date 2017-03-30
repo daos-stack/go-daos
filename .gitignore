@@ -1,0 +1,7 @@
+# vim
+*.swp
+
+# libdaosfs
+libdaosfs
+libdaosfs.so
+test
