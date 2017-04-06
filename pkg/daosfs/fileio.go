@@ -49,7 +49,7 @@ func (fh *FileHandle) Write(offset int64, data []byte) (int64, error) {
 		tx.Complete()
 	}()
 
-	debug.Printf("Writing %d bytes @ offset %d to %s (%s)", len(data), offset, fh.node.oid, fh.node.Name)
+	debug.Printf("Writing %d bytes @ offset %d to %s (%s)", len(data), offset, fh.node.Oid, fh.node.Name)
 
 	oh, err := fh.node.oh()
 	if err != nil {
@@ -101,7 +101,7 @@ func (fh *FileHandle) Read(offset, size int64, data []byte) (int64, error) {
 		size = actualSize
 	}
 
-	debug.Printf("Reading %d bytes @ offset %d from %s (%s)", size, offset, fh.node.oid, fh.node.Name)
+	debug.Printf("Reading %d bytes @ offset %d from %s (%s)", size, offset, fh.node.Oid, fh.node.Name)
 
 	oh, err := fh.node.oh()
 	if err != nil {
@@ -118,5 +118,5 @@ func (fh *FileHandle) Read(offset, size int64, data []byte) (int64, error) {
 	})
 	oa := daos.NewArray(oh.OH())
 
-	return oa.Read(fh.node.currentEpoch(), ar)
+	return oa.Read(fh.node.Epoch(), ar)
 }

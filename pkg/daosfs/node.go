@@ -50,11 +50,12 @@ type CreateRequest struct {
 // Node represents a file or directory stored in DAOS
 type Node struct {
 	fs        *FileSystem
-	oid       *daos.ObjectID
 	parent    *daos.ObjectID
 	modeType  os.FileMode
 	readEpoch *daos.Epoch
-	Name      string
+
+	Oid  *daos.ObjectID
+	Name string
 }
 
 // DirEntry holds information about the child of a directory Node
@@ -72,7 +73,7 @@ func (entry *DirEntry) Inode() uint64 {
 // Not really happy about this, but we need to be able to prevent a cached
 // open object handle from being purged/closed while it's in use.
 func (n *Node) oh() (*LockableObjectHandle, error) {
-	return n.fs.OpenObject(n.oid)
+	return n.fs.OpenObject(n.Oid)
 }
 
 func (n *Node) withWriteHandle(fn func(oh *LockableObjectHandle) error) error {
@@ -104,7 +105,7 @@ func (n *Node) getSize() (int64, error) {
 	size, err := n.withReadHandle(func(oh *LockableObjectHandle) (interface{}, error) {
 		val, err := oh.Get(n.fs.GetReadEpoch(), ".", "Size")
 		if err != nil {
-			return 0, errors.Wrapf(err, "Failed to fetch ./Size on %s", n.oid)
+			return 0, errors.Wrapf(err, "Failed to fetch ./Size on %s", n.Oid)
 		}
 
 		return binary.LittleEndian.Uint64(val), nil
@@ -123,7 +124,8 @@ func (n *Node) IsSnapshot() bool {
 	return n.readEpoch != nil
 }
 
-func (n *Node) currentEpoch() daos.Epoch {
+// Epoch returns the node's read epoch; either a snapshot or HCE.
+func (n *Node) Epoch() daos.Epoch {
 	if n.readEpoch != nil {
 		return *n.readEpoch
 	}
@@ -131,7 +133,7 @@ func (n *Node) currentEpoch() daos.Epoch {
 }
 
 func (n *Node) fetchEntry(name string) (*DirEntry, error) {
-	epoch := n.currentEpoch()
+	epoch := n.Epoch()
 	kvi, err := n.withReadHandle(func(oh *LockableObjectHandle) (interface{}, error) {
 		kv, err := oh.GetKeys(epoch, name, []string{"OID", "ModeType"})
 		return kv, errors.Wrap(err, "GetKeys failed")
@@ -224,7 +226,7 @@ func (n *Node) Attr() (*Attr, error) {
 
 	dkey := "."
 	kvi, err := n.withReadHandle(func(oh *LockableObjectHandle) (interface{}, error) {
-		kv, err := oh.GetKeys(n.currentEpoch(), dkey, []string{"Size", "Mtime", "Mode", "Uid", "Gid"})
+		kv, err := oh.GetKeys(n.Epoch(), dkey, []string{"Size", "Mtime", "Mode", "Uid", "Gid"})
 		return kv, errors.Wrapf(err, "get attrs for node %s", dkey)
 	})
 	if err != nil {
@@ -313,7 +315,7 @@ func (n *Node) Removexattr(name string) error {
 }
 
 func (n *Node) String() string {
-	return fmt.Sprintf("oid: %s, parent: %s, name: %s", n.oid, n.parent, n.Name)
+	return fmt.Sprintf("oid: %s, parent: %s, name: %s", n.Oid, n.parent, n.Name)
 }
 
 // Type returns the node type (ModeDir, ModeSymlink, etc)
@@ -325,26 +327,26 @@ func (n *Node) Type() os.FileMode {
 func (n *Node) Inode() uint64 {
 	// Fuse only supports uint64 Inodes, so just use the bottom part
 	// of the OID
-	return n.oid.Lo()
+	return n.Oid.Lo()
 }
 
 // Children returns a slice of *DirEntry
 func (n *Node) Children() ([]*DirEntry, error) {
 	var children []*DirEntry
 
-	epoch := n.currentEpoch()
-	debug.Printf("getting children of %s (%s)", n.oid, n.Name)
+	epoch := n.Epoch()
+	debug.Printf("getting children of %s (%s)", n.Oid, n.Name)
 	var anchor daos.Anchor
 	for !anchor.EOF() {
 		ki, err := n.withReadHandle(func(oh *LockableObjectHandle) (interface{}, error) {
 			keys, err := oh.DistKeys(epoch, &anchor)
-			return keys, errors.Wrapf(err, "Failed to fetch dkeys for %s", n.oid)
+			return keys, errors.Wrapf(err, "Failed to fetch dkeys for %s", n.Oid)
 		})
 		if err != nil {
-			return nil, errors.Wrapf(err, "Failed to fetch dkeys for %s", n.oid)
+			return nil, errors.Wrapf(err, "Failed to fetch dkeys for %s", n.Oid)
 		}
 		keys := ki.([][]byte)
-		debug.Printf("fetched %d keys for %s @ epoch %d", len(keys), n.oid, epoch)
+		debug.Printf("fetched %d keys for %s @ epoch %d", len(keys), n.Oid, epoch)
 
 		chunk := make([]*DirEntry, 0, len(keys))
 		for i := range keys {
@@ -366,14 +368,14 @@ func (n *Node) Children() ([]*DirEntry, error) {
 		}
 	}
 
-	debug.Printf("Found %d children of %s (%s)", len(children), n.oid, n.Name)
+	debug.Printf("Found %d children of %s (%s)", len(children), n.Oid, n.Name)
 	return children, nil
 }
 
 // Lookup attempts to find the object associated with the name and
 // returns a *daos.Node if found
 func (n *Node) Lookup(name string) (*Node, error) {
-	debug.Printf("looking up %s in %s", name, n.oid)
+	debug.Printf("looking up %s in %s", name, n.Oid)
 
 	entry, err := n.fetchEntry(name)
 	if err != nil {
@@ -381,8 +383,8 @@ func (n *Node) Lookup(name string) (*Node, error) {
 	}
 	debug.Printf("%s: entry %#v", name, entry)
 	child := Node{
-		oid:       entry.Oid,
-		parent:    n.oid,
+		Oid:       entry.Oid,
+		parent:    n.Oid,
 		fs:        n.fs,
 		modeType:  entry.Type,
 		readEpoch: n.readEpoch,
@@ -426,12 +428,12 @@ func (n *Node) createChild(uid, gid uint32, mode os.FileMode, name string) (*Nod
 	}
 
 	child := &Node{
-		oid:    nextOID,
-		parent: n.oid,
+		Oid:    nextOID,
+		parent: n.Oid,
 		fs:     n.fs,
 		Name:   name,
 	}
-	if _, err = n.fs.DeclareObjectEpoch(child.oid, tx.Epoch, objClass); err != nil {
+	if _, err = n.fs.DeclareObjectEpoch(child.Oid, tx.Epoch, objClass); err != nil {
 		return nil, err
 	}
 	debug.Printf("Created new child object %s", child)
@@ -482,7 +484,7 @@ func (n *Node) destroyChild(child *Node) error {
 
 	err = child.withWriteHandle(func(oh *LockableObjectHandle) error {
 		return errors.Wrapf(oh.Punch(tx.Epoch),
-			"Object punch failed on %s", child.oid)
+			"Object punch failed on %s", child.Oid)
 	})
 	if err != nil {
 		return err

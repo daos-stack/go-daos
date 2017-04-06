@@ -94,9 +94,9 @@ func NewFileSystem(group, pool, container string) (*FileSystem, error) {
 		Name: container,
 		uh:   uh,
 		root: &Node{
-			oid:      RootOID,
-			parent:   RootOID,
 			modeType: os.ModeDir,
+			parent:   RootOID,
+			Oid:      RootOID,
 			Name:     "",
 		},
 	}
@@ -140,7 +140,7 @@ func NewFileSystem(group, pool, container string) (*FileSystem, error) {
 	}
 
 	if created {
-		if _, err = fs.DeclareObject(fs.root.oid, daos.ClassTinyRW); err != nil {
+		if _, err = fs.DeclareObject(fs.root.Oid, daos.ClassTinyRW); err != nil {
 			return nil, err
 		}
 		rootAttr := &Attr{
@@ -153,7 +153,7 @@ func NewFileSystem(group, pool, container string) (*FileSystem, error) {
 			return fs.root.writeAttr(e, rootAttr)
 		})
 	} else {
-		_, err = fs.OpenObject(fs.root.oid)
+		_, err = fs.OpenObject(fs.root.Oid)
 	}
 
 	// Not sure if this is entirely correct, but should be good enough.
