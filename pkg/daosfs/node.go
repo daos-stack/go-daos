@@ -265,6 +265,8 @@ func (n *Node) Attr() (*Attr, error) {
 	return da, nil
 }
 
+// Getxattr returns the value of the node's extended attribute for the
+// given name
 func (n *Node) Getxattr(name string) ([]byte, error) {
 	debug.Printf("getxattr %s[%s]", n.Name, name)
 	switch name {
@@ -278,15 +280,17 @@ func (n *Node) Getxattr(name string) ([]byte, error) {
 	return nil, ErrNoXattr
 }
 
+// Listxattr returns a slice of extended attribute names for the node
 func (n *Node) Listxattr() ([]string, error) {
 	var attrs []string
 	if n.readEpoch != nil {
-		debug.Printf("listxattr %s[%s]", n.Name)
+		debug.Printf("listxattr %s", n.Name)
 		attrs = append(attrs, "user.snapshot_epoch")
 	}
 	return attrs, nil
 }
 
+// Setxattr sets a node's extended attribute to the given value
 func (n *Node) Setxattr(name string, value []byte, flags uint32) error {
 	debug.Printf("setxattr %s[%s] =  %s", n.Name, name, value)
 	switch name {
@@ -302,6 +306,7 @@ func (n *Node) Setxattr(name string, value []byte, flags uint32) error {
 	return nil
 }
 
+// Removexattr removes a node's extended attribute for the given name
 func (n *Node) Removexattr(name string) error {
 	debug.Printf("remove xattr %s[%s])", n.Name, name)
 
@@ -375,7 +380,7 @@ func (n *Node) Children() ([]*DirEntry, error) {
 // Lookup attempts to find the object associated with the name and
 // returns a *daos.Node if found
 func (n *Node) Lookup(name string) (*Node, error) {
-	debug.Printf("looking up %s in %s", name, n.Oid)
+	debug.Printf("looking up %s under %s", name, n.Oid)
 
 	entry, err := n.fetchEntry(name)
 	if err != nil {
