@@ -4,7 +4,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -50,12 +52,12 @@ type CreateRequest struct {
 // Node represents a file or directory stored in DAOS
 type Node struct {
 	fs        *FileSystem
-	parent    *daos.ObjectID
 	modeType  os.FileMode
 	readEpoch *daos.Epoch
 
-	Oid  *daos.ObjectID
-	Name string
+	Parent *Node
+	Oid    *daos.ObjectID
+	Name   string
 }
 
 // DirEntry holds information about the child of a directory Node
@@ -320,7 +322,7 @@ func (n *Node) Removexattr(name string) error {
 }
 
 func (n *Node) String() string {
-	return fmt.Sprintf("oid: %s, parent: %s, name: %s", n.Oid, n.parent, n.Name)
+	return fmt.Sprintf("oid: %s, parent: %s, name: %s", n.Oid, n.Parent.Oid, n.Name)
 }
 
 // Type returns the node type (ModeDir, ModeSymlink, etc)
@@ -377,26 +379,61 @@ func (n *Node) Children() ([]*DirEntry, error) {
 	return children, nil
 }
 
+// IsRoot indicates whether or not the node is the root node of the filesystem
+func (n *Node) IsRoot() bool {
+	return n.Oid == n.Parent.Oid
+}
+
 // Lookup attempts to find the object associated with the name and
 // returns a *daos.Node if found
 func (n *Node) Lookup(name string) (*Node, error) {
-	debug.Printf("looking up %s under %s", name, n.Oid)
+	debug.Printf("looking up %s under %q (%s)", name, n.Name, n.Oid)
 
-	entry, err := n.fetchEntry(name)
-	if err != nil {
-		return nil, errors.Wrapf(err, "Failed to fetch entry for %s", name)
-	}
-	debug.Printf("%s: entry %#v", name, entry)
-	child := Node{
-		Oid:       entry.Oid,
-		parent:    n.Oid,
-		fs:        n.fs,
-		modeType:  entry.Type,
-		readEpoch: n.readEpoch,
-		Name:      name,
+	name = filepath.Clean(name)
+	if n.IsRoot() {
+		if name == ".." || name == "/" {
+			return n, nil
+		}
 	}
 
-	return &child, nil
+	dir, file := filepath.Split(name)
+	if dir == "" || dir == "/" || dir == "." {
+		entry, err := n.fetchEntry(file)
+		if err != nil {
+			return nil, errors.Wrapf(err, "Failed to fetch entry for %s", file)
+		}
+		debug.Printf("%s: entry %#v", file, entry)
+		child := Node{
+			Oid:       entry.Oid,
+			Parent:    n,
+			fs:        n.fs,
+			modeType:  entry.Type,
+			readEpoch: n.readEpoch,
+			Name:      file,
+		}
+
+		return &child, nil
+	}
+
+	if dir == ".." {
+		return n.Parent.Lookup(file)
+	}
+
+	// First, walk down the list of subdirectories to find the parent,
+	// then lookup the desired node under that parent.
+	// TODO: Maybe a path->Node LRU cache is necessary for better
+	// performance here.
+	node := n
+	var err error
+	for _, subdir := range strings.Split(filepath.Clean(dir), "/") {
+		if subdir == "" {
+			continue
+		}
+		if node, err = node.Lookup(subdir); err != nil {
+			return nil, err
+		}
+	}
+	return node.Lookup(file)
 }
 
 func (n *Node) createChild(uid, gid uint32, mode os.FileMode, name string) (*Node, error) {
@@ -434,7 +471,7 @@ func (n *Node) createChild(uid, gid uint32, mode os.FileMode, name string) (*Nod
 
 	child := &Node{
 		Oid:    nextOID,
-		parent: n.Oid,
+		Parent: n,
 		fs:     n.fs,
 		Name:   name,
 	}

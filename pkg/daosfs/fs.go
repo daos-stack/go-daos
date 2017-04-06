@@ -95,11 +95,11 @@ func NewFileSystem(group, pool, container string) (*FileSystem, error) {
 		uh:   uh,
 		root: &Node{
 			modeType: os.ModeDir,
-			parent:   RootOID,
 			Oid:      RootOID,
 			Name:     "",
 		},
 	}
+	fs.root.Parent = fs.root
 	fs.root.fs = fs
 	fs.og = newOidGenerator(fs)
 
