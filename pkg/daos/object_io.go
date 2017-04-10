@@ -82,7 +82,7 @@ func (oh *ObjectHandle) Update(e Epoch, dkey []byte, reqs KeyRequests) error {
 	defer sgls.Free()
 	//log.Printf("KR: %#v", request)
 	//log.Printf("iov: %#v\nsg: %#v", iods.Pointer(), sgls.Pointer())
-	//log.Printf("rex: %#v", iods[0].vd_recxs)
+	//log.Printf("rex: %#v", iods[0].iod_recxs)
 	//log.Printf("sg: %#v", sgls[0].sg_iovs)
 	rc, err := C.daos_obj_update(oh.H(), e.Native(), distKey.Pointer(), C.uint(len(reqs)), iods.Pointer(), sgls.Pointer(), nil)
 	return rc2err("daos_obj_update", rc, err)
@@ -127,7 +127,7 @@ func (oh *ObjectHandle) Fetch(e Epoch, dkey []byte, reqs KeyRequests) error {
 
 	//log.Printf("KR: %#v", *request[0])
 	//log.Printf("iov: %#v\nsg: %#v", iods.Pointer(), sgls.Pointer())
-	//log.Printf("rex: %#v", iods[0].vd_recxs)
+	//log.Printf("rex: %#v", iods[0].iod_recxs)
 
 	rc, err := C.daos_obj_fetch(oh.H(), e.Native(), distKey.Pointer(), C.uint(len(reqs)), iods.Pointer(), sgls.Pointer(), nil, nil)
 	if err := rc2err("daos_obj_fetch", rc, err); err != nil {
@@ -149,7 +149,7 @@ func (oh *ObjectHandle) Fetch(e Epoch, dkey []byte, reqs KeyRequests) error {
 	}
 
 	//log.Printf("after sg: %#v", sgls.Pointer())
-	//log.Printf("after rex: %#v", iods[0].vd_recxs)
+	//log.Printf("after rex: %#v", iods[0].iod_recxs)
 	//log.Printf("num: %d num_out %d records", sgls[0].sg_nr.num, sgls[0].sg_nr.num_out)
 
 	CopySG(reqs, sgls)
@@ -160,7 +160,7 @@ type (
 	IoVec             C.daos_iov_t
 	DistKey           IoVec
 	AttrKey           IoVec
-	IODescriptor      C.daos_vec_iod_t
+	IODescriptor      C.daos_iod_t
 	SGList            C.daos_sg_list_t
 	SGListSlice       []SGList
 	IODescriptorSlice []IODescriptor
@@ -183,9 +183,9 @@ func InitIOD(reqs KeyRequests) IODescriptorSlice {
 
 	for i, req := range reqs {
 		ak := ByteToAttrKey(req.Attr)
-		iod[i].vd_name = ak.Native()
+		iod[i].iod_name = ak.Native()
 		nr := len(req.Extents)
-		iod[i].vd_nr = C.uint(nr)
+		iod[i].iod_nr = C.uint(nr)
 		recxs := allocRecx(nr)
 		reclist := (*[1 << 30]C.daos_recx_t)(unsafe.Pointer(recxs))[:nr:nr]
 		for j, ext := range req.Extents {
@@ -193,7 +193,7 @@ func InitIOD(reqs KeyRequests) IODescriptorSlice {
 			reclist[j].rx_idx = C.uint64_t(ext.Index)
 			reclist[j].rx_nr = C.uint64_t(ext.Count)
 		}
-		iod[i].vd_recxs = recxs
+		iod[i].iod_recxs = recxs
 	}
 	return iod
 }
@@ -201,7 +201,7 @@ func InitIOD(reqs KeyRequests) IODescriptorSlice {
 func CopyIOD(reqs KeyRequests, iod IODescriptorSlice) {
 	for i, req := range reqs {
 		nr := len(req.Extents)
-		reclist := (*[1 << 30]C.daos_recx_t)(unsafe.Pointer(iod[i].vd_recxs))[:nr:nr]
+		reclist := (*[1 << 30]C.daos_recx_t)(unsafe.Pointer(iod[i].iod_recxs))[:nr:nr]
 		for j := range req.Extents {
 			req.Extents[j].RecSize = uint64(reclist[j].rx_rsize)
 		}
@@ -210,13 +210,13 @@ func CopyIOD(reqs KeyRequests, iod IODescriptorSlice) {
 
 func (iod IODescriptorSlice) Free() {
 	for _, io := range iod {
-		(*AttrKey)(&io.vd_name).Free()
-		C.free(unsafe.Pointer(io.vd_recxs))
+		(*AttrKey)(&io.iod_name).Free()
+		C.free(unsafe.Pointer(io.iod_recxs))
 	}
 }
 
-func (iod IODescriptorSlice) Pointer() *C.daos_vec_iod_t {
-	return (*C.daos_vec_iod_t)(&iod[0])
+func (iod IODescriptorSlice) Pointer() *C.daos_iod_t {
+	return (*C.daos_iod_t)(&iod[0])
 }
 
 func InitSGUpdate(s RequestBufferSlicer) SGListSlice {

@@ -913,20 +913,20 @@ func (dk *DistKey) Free() {
 	(*IoVec)(dk).Free()
 }
 
-func (dk *DistKey) Pointer() *C.daos_dkey_t {
-	return (*C.daos_dkey_t)(dk)
+func (dk *DistKey) Pointer() *C.daos_key_t {
+	return (*C.daos_key_t)(dk)
 }
 
 func (ak *AttrKey) Free() {
 	(*IoVec)(ak).Free()
 }
 
-func (ak *AttrKey) Pointer() *C.daos_akey_t {
-	return (*C.daos_akey_t)(ak)
+func (ak *AttrKey) Pointer() *C.daos_key_t {
+	return (*C.daos_key_t)(ak)
 }
 
-func (ak *AttrKey) Native() C.daos_akey_t {
-	return C.daos_akey_t(*ak)
+func (ak *AttrKey) Native() C.daos_key_t {
+	return C.daos_key_t(*ak)
 }
 
 // Put sets the first record of a-key to value, with record size is len(value).
