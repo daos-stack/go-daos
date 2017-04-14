@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -18,19 +19,52 @@ import (
 
 // Attr represents a Node's file attributes
 type Attr struct {
-	Device uint32
-	Inode  uint64 // fuse only handles a uint64
-	Size   int64
-	Atime  time.Time
-	Mtime  time.Time
-	Ctime  time.Time
-	Mode   os.FileMode
-	Uid    uint32 // nolint
-	Gid    uint32 // nolint
-	// TODO: Implement other fields as necessary
+	Device  uint32
+	Inode   uint64 // fuse only handles a uint64
+	Mode    os.FileMode
+	Nlink   uint64
+	Uid     uint32 // nolint
+	Gid     uint32 // nolint
+	Rdev    uint64
+	Size    int64
+	Blksize int64
+	Blocks  int64
+	Atime   time.Time
+	Mtime   time.Time
+	Ctime   time.Time
 }
 
-// TODO: Some bigly refactoring needed here. Sad!
+// CMode converts the os.FileMode value into a C.mode_t suitable for
+// use as st_mode in a C.struct_stat.
+func (a *Attr) CMode() uint32 {
+	out := uint32(a.Mode) & 0777
+	switch {
+	default:
+		out |= syscall.S_IFREG
+	case a.Mode&os.ModeDir != 0:
+		out |= syscall.S_IFDIR
+	case a.Mode&os.ModeDevice != 0:
+		if a.Mode&os.ModeCharDevice != 0 {
+			out |= syscall.S_IFCHR
+		} else {
+			out |= syscall.S_IFBLK
+		}
+	case a.Mode&os.ModeNamedPipe != 0:
+		out |= syscall.S_IFIFO
+	case a.Mode&os.ModeSymlink != 0:
+		out |= syscall.S_IFLNK
+	case a.Mode&os.ModeSocket != 0:
+		out |= syscall.S_IFSOCK
+	}
+	if a.Mode&os.ModeSetuid != 0 {
+		out |= syscall.S_ISUID
+	}
+	if a.Mode&os.ModeSetgid != 0 {
+		out |= syscall.S_ISGID
+	}
+
+	return out
+}
 
 // MkdirRequest contains the information needed to complete a mkdir() request
 type MkdirRequest struct {
