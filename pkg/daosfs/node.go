@@ -18,7 +18,9 @@ import (
 type Attr struct {
 	Inode uint64 // fuse only handles a uint64
 	Size  int64
+	Atime time.Time
 	Mtime time.Time
+	Ctime time.Time
 	Mode  os.FileMode
 	Uid   uint32 // nolint
 	Gid   uint32 // nolint
@@ -252,6 +254,9 @@ func (n *Node) Attr() (*Attr, error) {
 			da.Gid = binary.LittleEndian.Uint32(val)
 		}
 	}
+	// TODO: Properly support atime/ctime
+	da.Atime = da.Mtime
+	da.Ctime = da.Mtime
 
 	return da, nil
 }
