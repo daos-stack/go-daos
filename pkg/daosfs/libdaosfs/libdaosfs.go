@@ -13,6 +13,8 @@ package main
 // #endif
 import "C"
 import (
+	"encoding/binary"
+	"hash/fnv"
 	"os"
 	"sync"
 	"syscall"
@@ -24,121 +26,120 @@ import (
 	"github.com/intel-hpdd/logging/debug"
 )
 
-// These maps are kind of a kludge, but they're necessary to avoid
+// This map is kind of a kludge, but it's necessary to avoid
 // GC problems. The rules of cgo (1) specify that pointers passed
 // between Go and C may not contain pointers. Basically we just keep
 // refs to Go-allocated things as map values so that the GC doesn't
 // mark them for collection.
 //
 // 1. https://golang.org/cmd/cgo/#hdr-Passing_pointers
-
-// A thread-safe map of pointers to *daosfs.Filesystem instances
-type fsHandleMap struct {
+type refMap struct {
 	sync.RWMutex
-	p2h  map[uintptr]*daosfs.FileSystem
-	refs map[uintptr]int
+	h2r  map[uint64]interface{}
+	refs map[uint64]int
 }
 
-var fsHandles = &fsHandleMap{
-	p2h:  map[uintptr]*daosfs.FileSystem{},
-	refs: map[uintptr]int{},
+var refs = &refMap{
+	h2r:  map[uint64]interface{}{},
+	refs: map[uint64]int{},
 }
 
-func (fsm *fsHandleMap) Get(ptr uintptr) (*daosfs.FileSystem, bool) {
-	fsm.Lock()
-	defer fsm.Unlock()
+func (rm *refMap) Get(hash uint64) (interface{}, bool) {
+	rm.Lock()
+	defer rm.Unlock()
 
-	fs, found := fsm.p2h[ptr]
+	ref, found := rm.h2r[hash]
 	if found {
-		fsm.refs[ptr]++
+		rm.refs[hash]++
 	}
-	return fs, found
+	return ref, found
 }
 
-func (fsm *fsHandleMap) Set(fs *daosfs.FileSystem) uintptr {
-	fsm.Lock()
-	defer fsm.Unlock()
+func (rm *refMap) Set(ref interface{}) uint64 {
+	rm.Lock()
+	defer rm.Unlock()
 
-	ptr := uintptr(unsafe.Pointer(fs))
-	if _, found := fsm.p2h[ptr]; !found {
-		fsm.p2h[ptr] = fs
+	hash := fnv.New64()
+	switch o := ref.(type) {
+	case *daosfs.Node:
+		hash.Write([]byte("daosfs-node"))
+		inode := make([]byte, 8)
+		binary.LittleEndian.PutUint64(inode, o.Inode())
+		hash.Write(inode)
+	case *daosfs.FileSystem:
+		hash.Write([]byte("daosfs-filesystem"))
+		hash.Write([]byte(o.Name))
+	default:
+		panic("Unknown interface type given to refMap.Set()")
 	}
-	fsm.refs[ptr]++
 
-	return ptr
+	h := hash.Sum64()
+	if _, found := rm.h2r[h]; !found {
+		rm.h2r[h] = ref
+	}
+	rm.refs[h]++
+
+	return h
 }
 
-func (fsm *fsHandleMap) Delete(ptr uintptr) {
-	fsm.Lock()
-	defer fsm.Unlock()
+func (rm *refMap) Delete(hash uint64) {
+	rm.Lock()
+	defer rm.Unlock()
 
-	if _, found := fsm.p2h[ptr]; found {
-		fsm.refs[ptr]--
+	if _, found := rm.h2r[hash]; found {
+		rm.refs[hash]--
 	} else {
 		return
 	}
 
-	if fsm.refs[ptr] <= 0 {
-		debug.Printf("Deleting fs %s from ref map", fsm.p2h[ptr].Name)
-		delete(fsm.refs, ptr)
-		delete(fsm.p2h, ptr)
+	if rm.refs[hash] <= 0 {
+		debug.Printf("Deleting ref %v from ref map", rm.h2r[hash])
+		delete(rm.refs, hash)
+		delete(rm.h2r, hash)
 	}
 }
 
-// A thread-safe map of pointers to *daosfs.Node instances
-type nodeHandleMap struct {
-	sync.RWMutex
-	p2h  map[uintptr]*daosfs.Node
-	refs map[uintptr]int
-}
-
-var nodeHandles = &nodeHandleMap{
-	p2h:  map[uintptr]*daosfs.Node{},
-	refs: map[uintptr]int{},
-}
-
-func (nm *nodeHandleMap) Get(ptr uintptr) (*daosfs.Node, bool) {
-	nm.Lock()
-	defer nm.Unlock()
-
-	node, found := nm.p2h[ptr]
-	if found {
-		nm.refs[ptr]++
-	}
-	return node, found
-}
-
-func (nm *nodeHandleMap) Set(fs *daosfs.Node) uintptr {
-	nm.Lock()
-	defer nm.Unlock()
-
-	ptr := uintptr(unsafe.Pointer(fs))
-	if _, found := nm.p2h[ptr]; !found {
-		nm.p2h[ptr] = fs
-	}
-	nm.refs[ptr]++
-
-	return ptr
-}
-
-func (nm *nodeHandleMap) Delete(ptr uintptr) {
-	nm.Lock()
-	defer nm.Unlock()
-
-	if _, found := nm.p2h[ptr]; found {
-		nm.refs[ptr]--
-	} else {
-		return
+func getFs(cFs *C.struct_daosfs_fs_handle) (*daosfs.FileSystem, error) {
+	if cFs == nil {
+		debug.Print("Got nil fs handle")
+		return nil, syscall.EINVAL
 	}
 
-	if nm.refs[ptr] <= 0 {
-		debug.Printf("Deleting node %s (%s) from ref map", nm.p2h[ptr].Oid, nm.p2h[ptr].Name)
-		delete(nm.refs, ptr)
-		delete(nm.p2h, ptr)
+	hash := uint64(cFs.fs_ptr)
+	ref, found := refs.Get(hash)
+	if !found {
+		debug.Printf("No fs ref found for %d", hash)
+		return nil, syscall.ENOENT
 	}
+
+	fs, ok := ref.(*daosfs.FileSystem)
+	if !ok {
+		debug.Printf("%d does not refer to a *daosfs.FileSystem", hash)
+	}
+
+	return fs, nil
 }
 
-func main() {}
+func getNode(cNh *C.struct_daosfs_node_handle) (*daosfs.Node, error) {
+	if cNh == nil {
+		debug.Print("Got nil node handle")
+		return nil, syscall.EINVAL
+	}
+
+	hash := uint64(cNh.node_ptr)
+	ref, found := refs.Get(hash)
+	if !found {
+		debug.Printf("No node ref found for %d", hash)
+		return nil, syscall.ENOENT
+	}
+
+	node, ok := ref.(*daosfs.Node)
+	if !ok {
+		debug.Printf("%d does not refer to a *daosfs.Node", hash)
+	}
+
+	return node, nil
+}
 
 func err2rc(err error) C.int {
 	if err == nil {
@@ -153,6 +154,40 @@ func err2rc(err error) C.int {
 		return -C.int(syscall.EFAULT)
 	}
 }
+
+func st2fm(cMode C.__mode_t) (mode os.FileMode) {
+	// TODO: See if there is a more portable way of doing this.
+	// This is lifted from os/stat_linux.go
+	mode = os.FileMode(uint32(cMode) & 0777)
+	switch uint32(cMode) & syscall.S_IFMT {
+	case syscall.S_IFBLK:
+		mode |= os.ModeDevice
+	case syscall.S_IFCHR:
+		mode |= os.ModeDevice | os.ModeCharDevice
+	case syscall.S_IFDIR:
+		mode |= os.ModeDir
+	case syscall.S_IFIFO:
+		mode |= os.ModeNamedPipe
+	case syscall.S_IFLNK:
+		mode |= os.ModeSymlink
+	case syscall.S_IFREG:
+		// nothing to do
+	case syscall.S_IFSOCK:
+		mode |= os.ModeSocket
+	}
+	if uint32(cMode)&syscall.S_ISGID != 0 {
+		mode |= os.ModeSetgid
+	}
+	if uint32(cMode)&syscall.S_ISUID != 0 {
+		mode |= os.ModeSetuid
+	}
+	if uint32(cMode)&syscall.S_ISVTX != 0 {
+		mode |= os.ModeSticky
+	}
+	return
+}
+
+func main() {}
 
 // LibDaosFileSystemInit initializes the DAOS libraries. It should only be
 // called once per invocation of main(). The supplied opaque library handle
@@ -183,16 +218,18 @@ func LibDaosFileSystemFini(dfs C.daosfs_t) {
 		return
 	}
 
-	toClose := make([]uintptr, 0, len(fsHandles.p2h))
-	fsHandles.RLock()
-	for ptr, fs := range fsHandles.p2h {
-		debug.Printf("Closing fs %q (%v) in Fini()", fs.Name, ptr)
-		toClose = append(toClose, ptr)
+	toClose := make([]uint64, 0, len(refs.h2r))
+	refs.RLock()
+	for hash, ref := range refs.h2r {
+		if fs, ok := ref.(*daosfs.FileSystem); ok {
+			debug.Printf("Closing fs %q (%d) in Fini()", fs.Name, hash)
+			toClose = append(toClose, hash)
+		}
 	}
-	fsHandles.RUnlock()
+	refs.RUnlock()
 
-	for _, ptr := range toClose {
-		fsh := &C.struct_daosfs_fs_handle{fs_ptr: (C.daosfs_ptr_t)(ptr)}
+	for _, hash := range toClose {
+		fsh := &C.struct_daosfs_fs_handle{fs_ptr: (C.daosfs_ptr_t)(hash)}
 		if rc := CloseDaosFileSystem(fsh); rc != 0 {
 			debug.Printf("Got rc %d while closing filesystem", rc)
 			return
@@ -238,8 +275,8 @@ func OpenDaosFileSystem(cGroup, cPool, cContainer *C.char, cFs **C.struct_daosfs
 	}
 
 	*cFs = (*C.struct_daosfs_fs_handle)(C.malloc(C.sizeof_struct_daosfs_fs_handle))
-	(*cFs).fs_ptr = (C.daosfs_ptr_t)(fsHandles.Set(fs))
-	(*cFs).root_ptr = (C.daosfs_ptr_t)(nodeHandles.Set(fs.Root()))
+	(*cFs).fs_ptr = (C.daosfs_ptr_t)(refs.Set(fs))
+	(*cFs).root_ptr = (C.daosfs_ptr_t)(refs.Set(fs.Root()))
 	debug.Printf("Opened filesystem %q: %v", fs.Name, (*cFs).fs_ptr)
 
 	return 0
@@ -252,15 +289,9 @@ func OpenDaosFileSystem(cGroup, cPool, cContainer *C.char, cFs **C.struct_daosfs
 // LibDaosFileSystemFini().
 //export CloseDaosFileSystem
 func CloseDaosFileSystem(cFs *C.struct_daosfs_fs_handle) C.int {
-	if cFs == nil {
-		debug.Print("Got nil pointer in CloseDaosFileSystem()")
-		return -C.int(syscall.EINVAL)
-	}
-
-	fs, found := fsHandles.Get(uintptr(cFs.fs_ptr))
-	if !found {
-		debug.Printf("Could not find filesystem for %v", cFs.fs_ptr)
-		return -C.int(syscall.EINVAL)
+	fs, err := getFs(cFs)
+	if err != nil {
+		return err2rc(err)
 	}
 	debug.Printf("Closing filesystem %q: %v", fs.Name, cFs.fs_ptr)
 
@@ -269,8 +300,8 @@ func CloseDaosFileSystem(cFs *C.struct_daosfs_fs_handle) C.int {
 		return -C.int(syscall.EFAULT)
 	}
 
-	nodeHandles.Delete(uintptr(cFs.root_ptr))
-	fsHandles.Delete(uintptr(cFs.fs_ptr))
+	refs.Delete(uint64(cFs.root_ptr))
+	refs.Delete(uint64(cFs.fs_ptr))
 	C.free(unsafe.Pointer(cFs))
 	cFs = nil
 
@@ -280,66 +311,22 @@ func CloseDaosFileSystem(cFs *C.struct_daosfs_fs_handle) C.int {
 // DaosFileSystemTruncate truncates the file to the specifed size
 //export DaosFileSystemTruncate
 func DaosFileSystemTruncate(cNh *C.struct_daosfs_node_handle, cSize C.size_t) C.int {
-	if cNh == nil {
-		debug.Print("Got nil pointer in DaosFileSystemTruncate()")
-		return -C.int(syscall.EINVAL)
-	}
-
-	_, found := nodeHandles.Get(uintptr(cNh.node_ptr))
-	if !found {
-		debug.Printf("Unable to find node for %p", cNh.node_ptr)
-		return -C.int(syscall.EINVAL)
+	_, err := getNode(cNh)
+	if err != nil {
+		return err2rc(err)
 	}
 
 	// TODO: Implement this -- needs support in DAOS I think?
 	return -C.int(syscall.ENOTSUP)
 }
 
-func st2fm(cMode C.__mode_t) (mode os.FileMode) {
-	// TODO: See if there is a more portable way of doing this.
-	// This is lifted from os/stat_linux.go
-	mode = os.FileMode(uint32(cMode) & 0777)
-	switch uint32(cMode) & syscall.S_IFMT {
-	case syscall.S_IFBLK:
-		mode |= os.ModeDevice
-	case syscall.S_IFCHR:
-		mode |= os.ModeDevice | os.ModeCharDevice
-	case syscall.S_IFDIR:
-		mode |= os.ModeDir
-	case syscall.S_IFIFO:
-		mode |= os.ModeNamedPipe
-	case syscall.S_IFLNK:
-		mode |= os.ModeSymlink
-	case syscall.S_IFREG:
-		// nothing to do
-	case syscall.S_IFSOCK:
-		mode |= os.ModeSocket
-	}
-	if uint32(cMode)&syscall.S_ISGID != 0 {
-		mode |= os.ModeSetgid
-	}
-	if uint32(cMode)&syscall.S_ISUID != 0 {
-		mode |= os.ModeSetuid
-	}
-	if uint32(cMode)&syscall.S_ISVTX != 0 {
-		mode |= os.ModeSticky
-	}
-	return
-}
-
 // DaosFileSystemSetAttr updates the node's attributes based on the
 // values supplied in the given *C.struct_stat
 //export DaosFileSystemSetAttr
 func DaosFileSystemSetAttr(cNh *C.struct_daosfs_node_handle, st *C.struct_stat, cMask C.uint32_t) C.int {
-	if cNh == nil {
-		debug.Print("Got nil pointer in DaosFileSystemSetAttr()")
-		return -C.int(syscall.EINVAL)
-	}
-
-	node, found := nodeHandles.Get(uintptr(cNh.node_ptr))
-	if !found {
-		debug.Printf("Unable to find node for %p", cNh.node_ptr)
-		return -C.int(syscall.EINVAL)
+	node, err := getNode(cNh)
+	if err != nil {
+		return err2rc(err)
 	}
 
 	mask := uint32(cMask)
@@ -376,11 +363,10 @@ func DaosFileSystemSetAttr(cNh *C.struct_daosfs_node_handle, st *C.struct_stat, 
 // DaosFileSystemGetAttr fills in a *C.struct_stat with the attributes
 // of the supplied *daosfs.Node.
 //export DaosFileSystemGetAttr
-func DaosFileSystemGetAttr(np C.daosfs_ptr_t, st *C.struct_stat) C.int {
-	node, found := nodeHandles.Get(uintptr(np))
-	if !found {
-		debug.Printf("Unable to find node for %p", np)
-		return -C.int(syscall.EINVAL)
+func DaosFileSystemGetAttr(cNh *C.struct_daosfs_node_handle, st *C.struct_stat) C.int {
+	node, err := getNode(cNh)
+	if err != nil {
+		return err2rc(err)
 	}
 
 	na, err := node.GetAttr()
@@ -417,44 +403,18 @@ func DaosFileSystemGetAttr(np C.daosfs_ptr_t, st *C.struct_stat) C.int {
 	return 0
 }
 
-/*
-// DaosFileSystemGetNodeObjectID copies the supplied *daosfs.Node's
-// ObjectID into the supplied oid parameter.
-//export DaosFileSystemGetNodeObjectID
-func DaosFileSystemGetNodeObjectID(np C.daosfs_node_t, oid *C.daos_obj_id_t) {
-	if cn == nil || oid == nil {
-		return
-	}
-
-	node := (*daosfs.Node)(cn)
-	C.memcpy(unsafe.Pointer(oid),
-		unsafe.Pointer(node.Oid.Pointer()),
-		C.sizeof_daos_obj_id_t)
-}
-
-// DaosFileSystemGetNodeEpoch copies the supplied *daosfs.Node's
-// Epoch into the supplied epoch parameter.
-//export DaosFileSystemGetNodeEpoch
-func DaosFileSystemGetNodeEpoch(cn C.daosfs_node_t, epoch *C.daos_epoch_t) {
-	if cn == nil || epoch == nil {
-		return
-	}
-
-	node := (*daosfs.Node)(cn)
-	ne := node.Epoch()
-	C.memcpy(unsafe.Pointer(epoch),
-		unsafe.Pointer(ne.Pointer()),
-		C.sizeof_daos_epoch_t)
-}
-*/
-
 // DaosFileSystemGetNodeHandle creates a *C.struct_daosfs_node_handle to wrap
 // a *daos.Node.
 //export DaosFileSystemGetNodeHandle
 func DaosFileSystemGetNodeHandle(np C.daosfs_ptr_t, cNh **C.struct_daosfs_node_handle) C.int {
-	node, found := nodeHandles.Get(uintptr(np))
+	ref, found := refs.Get(uint64(np))
 	if !found {
 		debug.Printf("Unable to find node for %p", np)
+		return -C.int(syscall.ENOENT)
+	}
+	node, ok := ref.(*daosfs.Node)
+	if !ok {
+		debug.Printf("%p does not refer to a *daosfs.Node", uint64(np))
 		return -C.int(syscall.EINVAL)
 	}
 
@@ -481,7 +441,7 @@ func DaosFileSystemFreeNodeHandle(cNh *C.struct_daosfs_node_handle) {
 		debug.Print("Got nil pointer in DaosFileSystemFreeNodeHandle()")
 		return
 	}
-	nodeHandles.Delete(uintptr(cNh.node_ptr))
+	refs.Delete(uint64(cNh.node_ptr))
 
 	C.free(unsafe.Pointer(cNh))
 }
@@ -489,15 +449,9 @@ func DaosFileSystemFreeNodeHandle(cNh *C.struct_daosfs_node_handle) {
 // DaosFileSystemOpen opens the supplied node handle
 //export DaosFileSystemOpen
 func DaosFileSystemOpen(cNh *C.struct_daosfs_node_handle, flags C.int) C.int {
-	if cNh == nil {
-		debug.Print("Got nil pointer in DaosFileSystemOpen()")
-		return -C.int(syscall.EINVAL)
-	}
-
-	node, found := nodeHandles.Get(uintptr(cNh.node_ptr))
-	if !found {
-		debug.Printf("Unable to find node for %p", cNh.node_ptr)
-		return -C.int(syscall.EINVAL)
+	node, err := getNode(cNh)
+	if err != nil {
+		return err2rc(err)
 	}
 
 	debug.Print("DaosFileSystemOpen()")
@@ -507,15 +461,9 @@ func DaosFileSystemOpen(cNh *C.struct_daosfs_node_handle, flags C.int) C.int {
 // DaosFileSystemClose closes the supplied node handle
 //export DaosFileSystemClose
 func DaosFileSystemClose(cNh *C.struct_daosfs_node_handle) C.int {
-	if cNh == nil {
-		debug.Print("Got nil pointer in DaosFileSystemClose()")
-		return -C.int(syscall.EINVAL)
-	}
-
-	node, found := nodeHandles.Get(uintptr(cNh.node_ptr))
-	if !found {
-		debug.Printf("Unable to find node for %p", cNh.node_ptr)
-		return -C.int(syscall.EINVAL)
+	node, err := getNode(cNh)
+	if err != nil {
+		return err2rc(err)
 	}
 
 	debug.Print("DaosFileSystemClose()")
@@ -525,15 +473,9 @@ func DaosFileSystemClose(cNh *C.struct_daosfs_node_handle) C.int {
 // DaosFileSystemRead reads from a node handle
 //export DaosFileSystemRead
 func DaosFileSystemRead(cNh *C.struct_daosfs_node_handle, cOffset C.uint64_t, cBufSize C.size_t, cReadAmount *C.size_t, cBuffer unsafe.Pointer) C.int {
-	if cNh == nil {
-		debug.Print("Got nil pointer in DaosFileSystemRead()")
-		return -C.int(syscall.EINVAL)
-	}
-
-	node, found := nodeHandles.Get(uintptr(cNh.node_ptr))
-	if !found {
-		debug.Printf("Unable to find node for %p", cNh.node_ptr)
-		return -C.int(syscall.EINVAL)
+	node, err := getNode(cNh)
+	if err != nil {
+		return err2rc(err)
 	}
 
 	/* TODO: Add support for NFSv4 and stateful ops. For now,
@@ -560,15 +502,9 @@ func DaosFileSystemRead(cNh *C.struct_daosfs_node_handle, cOffset C.uint64_t, cB
 // DaosFileSystemWrite writes to a node handle
 //export DaosFileSystemWrite
 func DaosFileSystemWrite(cNh *C.struct_daosfs_node_handle, cOffset C.uint64_t, cBufSize C.size_t, cWroteAmount *C.size_t, cBuffer unsafe.Pointer) C.int {
-	if cNh == nil {
-		debug.Print("Got nil pointer in DaosFileSystemWrite()")
-		return -C.int(syscall.EINVAL)
-	}
-
-	node, found := nodeHandles.Get(uintptr(cNh.node_ptr))
-	if !found {
-		debug.Printf("Unable to find node for %p", cNh.node_ptr)
-		return -C.int(syscall.EINVAL)
+	node, err := getNode(cNh)
+	if err != nil {
+		return err2rc(err)
 	}
 
 	if !node.IsOpen() {
@@ -595,15 +531,9 @@ func DaosFileSystemWrite(cNh *C.struct_daosfs_node_handle, cOffset C.uint64_t, c
 // DaosFileSystemCommit signals to the node's file handle that it should commit
 //export DaosFileSystemCommit
 func DaosFileSystemCommit(cNh *C.struct_daosfs_node_handle, cOffset C.off_t, cLength C.size_t) C.int {
-	if cNh == nil {
-		debug.Print("Got nil pointer in DaosFileSystemCommit()")
-		return -C.int(syscall.EINVAL)
-	}
-
-	node, found := nodeHandles.Get(uintptr(cNh.node_ptr))
-	if !found {
-		debug.Printf("Unable to find node for %p", cNh.node_ptr)
-		return -C.int(syscall.EINVAL)
+	node, err := getNode(cNh)
+	if err != nil {
+		return err2rc(err)
 	}
 
 	if !node.IsOpen() {
@@ -623,15 +553,9 @@ func DaosFileSystemCommit(cNh *C.struct_daosfs_node_handle, cOffset C.off_t, cLe
 // DaosFileSystemCreate creates a regular file
 //export DaosFileSystemCreate
 func DaosFileSystemCreate(cNh *C.struct_daosfs_node_handle, cName *C.char, st *C.struct_stat, flags C.int, out **C.struct_daosfs_node_handle) C.int {
-	if cNh == nil || cName == nil {
-		debug.Print("Got nil pointer in DaosFileSystemCreate()")
-		return -C.int(syscall.EINVAL)
-	}
-
-	parent, found := nodeHandles.Get(uintptr(cNh.node_ptr))
-	if !found {
-		debug.Printf("Unable to find node for %p", cNh.node_ptr)
-		return -C.int(syscall.EINVAL)
+	parent, err := getNode(cNh)
+	if err != nil {
+		return err2rc(err)
 	}
 
 	dreq := daosfs.CreateRequest{
@@ -648,26 +572,20 @@ func DaosFileSystemCreate(cNh *C.struct_daosfs_node_handle, cName *C.char, st *C
 		return err2rc(err)
 	}
 
-	ptr := (C.daosfs_ptr_t)(nodeHandles.Set(child))
-	if rc := DaosFileSystemGetAttr(ptr, st); rc != 0 {
+	ptr := (C.daosfs_ptr_t)(refs.Set(child))
+	if rc := DaosFileSystemGetNodeHandle(ptr, out); rc != 0 {
 		return rc
 	}
 
-	return DaosFileSystemGetNodeHandle(ptr, out)
+	return DaosFileSystemGetAttr(*out, st)
 }
 
 // DaosFileSystemMkdir creates a directory
 //export DaosFileSystemMkdir
 func DaosFileSystemMkdir(cNh *C.struct_daosfs_node_handle, cName *C.char, st *C.struct_stat, out **C.struct_daosfs_node_handle) C.int {
-	if cNh == nil || cName == nil {
-		debug.Print("Got nil pointer in DaosFileSystemMkdir()")
-		return -C.int(syscall.EINVAL)
-	}
-
-	parent, found := nodeHandles.Get(uintptr(cNh.node_ptr))
-	if !found {
-		debug.Printf("Unable to find node for %p", cNh.node_ptr)
-		return -C.int(syscall.EINVAL)
+	parent, err := getNode(cNh)
+	if err != nil {
+		return err2rc(err)
 	}
 
 	dreq := daosfs.MkdirRequest{
@@ -682,36 +600,30 @@ func DaosFileSystemMkdir(cNh *C.struct_daosfs_node_handle, cName *C.char, st *C.
 		return err2rc(err)
 	}
 
-	ptr := (C.daosfs_ptr_t)(nodeHandles.Set(child))
-	if rc := DaosFileSystemGetAttr(ptr, st); rc != 0 {
+	ptr := (C.daosfs_ptr_t)(refs.Set(child))
+	if rc := DaosFileSystemGetNodeHandle(ptr, out); rc != 0 {
 		return rc
 	}
 
-	return DaosFileSystemGetNodeHandle(ptr, out)
+	return DaosFileSystemGetAttr(*out, st)
 }
 
 // DaosFileSystemLookupPath creates a node handle for node at the given
 // path, if found.
 //export DaosFileSystemLookupPath
 func DaosFileSystemLookupPath(cNh *C.struct_daosfs_node_handle, cPath *C.char, out **C.struct_daosfs_node_handle) C.int {
-	if cNh == nil || cPath == nil {
-		debug.Print("Got nil pointer in DaosFileSystemLookupPath()")
-		return -C.int(syscall.EINVAL)
+	parent, err := getNode(cNh)
+	if err != nil {
+		return err2rc(err)
 	}
 
 	path := C.GoString(cPath)
-	parent, found := nodeHandles.Get(uintptr(cNh.node_ptr))
-	if !found {
-		debug.Printf("Unable to find node for %p", cNh.node_ptr)
-		return -C.int(syscall.EINVAL)
-	}
-
 	child, err := parent.Lookup(path)
 	if err != nil {
 		return -C.int(syscall.ENOENT)
 	}
 
-	ptr := (C.daosfs_ptr_t)(nodeHandles.Set(child))
+	ptr := (C.daosfs_ptr_t)(refs.Set(child))
 	return DaosFileSystemGetNodeHandle(ptr, out)
 }
 
@@ -719,15 +631,14 @@ func DaosFileSystemLookupPath(cNh *C.struct_daosfs_node_handle, cPath *C.char, o
 // by the given hash key (NFS-style lookup).
 //export DaosFileSystemLookupHandle
 func DaosFileSystemLookupHandle(cFs *C.struct_daosfs_fs_handle, cNk *C.struct_daosfs_node_key, out **C.struct_daosfs_node_handle) C.int {
-	if cFs == nil || cNk == nil {
-		debug.Print("Got nil pointer in DaosFileSystemLookupHandle()")
+	if cNk == nil {
+		debug.Print("Got nil nodekey in DaosFileSystemLookupHandle()")
 		return -C.int(syscall.EINVAL)
 	}
 
-	fs, found := fsHandles.Get(uintptr(cFs.fs_ptr))
-	if !found {
-		debug.Printf("Unable to find fs for %p", cFs.fs_ptr)
-		return -C.int(syscall.EINVAL)
+	fs, err := getFs(cFs)
+	if err != nil {
+		return err2rc(err)
 	}
 
 	var oid daos.ObjectID
@@ -740,7 +651,7 @@ func DaosFileSystemLookupHandle(cFs *C.struct_daosfs_fs_handle, cNk *C.struct_da
 		return -C.int(syscall.ENOENT)
 	}
 
-	ptr := (C.daosfs_ptr_t)(nodeHandles.Set(node))
+	ptr := (C.daosfs_ptr_t)(refs.Set(node))
 	return DaosFileSystemGetNodeHandle(ptr, out)
 }
 
@@ -771,28 +682,22 @@ func DaosFileSystemStatFs(cFs *C.struct_daosfs_fs_handle, cVst *C.struct_daosfs_
 // DaosFileSystemUnlink removes the named entry from a directory.
 //export DaosFileSystemUnlink
 func DaosFileSystemUnlink(cNh *C.struct_daosfs_node_handle, cPath *C.char) C.int {
-	if cNh == nil || cPath == nil {
-		debug.Print("Got nil pointer in DaosFileSystemUnlink()")
-		return -C.int(syscall.EINVAL)
+	parent, err := getNode(cNh)
+	if err != nil {
+		return err2rc(err)
 	}
 
 	path := C.GoString(cPath)
-	node, found := nodeHandles.Get(uintptr(cNh.node_ptr))
-	if !found {
-		debug.Printf("Unable to find node for %p", cNh.node_ptr)
-		return -C.int(syscall.EINVAL)
-	}
-
-	child, err := node.Lookup(path)
+	child, err := parent.Lookup(path)
 	if err != nil {
 		return -C.int(syscall.ENOENT)
 	}
 
 	switch child.Type() {
 	case os.ModeDir:
-		err = node.Rmdir(path)
+		err = parent.Rmdir(path)
 	default:
-		err = node.Unlink(path)
+		err = parent.Unlink(path)
 	}
 
 	return err2rc(err)
@@ -802,20 +707,14 @@ func DaosFileSystemUnlink(cNh *C.struct_daosfs_node_handle, cPath *C.char) C.int
 // found dirent info to the supplied callback.
 //export DaosFileSystemReadDir
 func DaosFileSystemReadDir(cNh *C.struct_daosfs_node_handle, cOffset *C.uint64_t, rcb C.daosfs_readdir_cb, rcbArg unsafe.Pointer, cEOF *C.bool) C.int {
-	if cNh == nil {
-		debug.Print("Got nil pointer in DaosFileSystemReadDir()")
-		return -C.int(syscall.EINVAL)
-	}
-
-	node, found := nodeHandles.Get(uintptr(cNh.node_ptr))
-	if !found {
-		debug.Printf("Unable to find node for %p", cNh.node_ptr)
-		return -C.int(syscall.EINVAL)
-	}
-
-	children, err := node.Children()
+	parent, err := getNode(cNh)
 	if err != nil {
-		debug.Printf("Unable to get children of %s (%s): %s", node.Name, node.Oid, err)
+		return err2rc(err)
+	}
+
+	children, err := parent.Children()
+	if err != nil {
+		debug.Printf("Unable to get children of %s (%s): %s", parent.Name, parent.Oid, err)
 		return -C.int(syscall.EFAULT)
 	}
 	for i, child := range children {

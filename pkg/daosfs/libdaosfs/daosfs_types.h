@@ -4,7 +4,7 @@
 #include <daos.h>
 
 typedef void* daosfs_t;
-typedef __SIZE_TYPE__ daosfs_ptr_t; // GoUintptr
+typedef unsigned long long daosfs_ptr_t; // GoUint64
 typedef bool (*daosfs_readdir_cb)(char *name, void *arg, uint64_t offset);
 
 struct daosfs_node_key {
