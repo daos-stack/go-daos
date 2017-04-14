@@ -375,6 +375,10 @@ func (n *Node) Inode() uint64 {
 func (n *Node) Children() ([]*DirEntry, error) {
 	var children []*DirEntry
 
+	if n.Type() != os.ModeDir {
+		return nil, unix.ENOTDIR
+	}
+
 	epoch := n.Epoch()
 	debug.Printf("getting children of %s (%s)", n.Oid, n.Name)
 	var anchor daos.Anchor
