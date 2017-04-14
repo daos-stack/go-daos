@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"syscall"
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
@@ -30,11 +31,19 @@ func NewFile(node *daosfs.Node) *File {
 
 // Open implements the FileOpener interface
 func (f *File) Open(ctx context.Context, req *fuse.OpenRequest, res *fuse.OpenResponse) (fs.Handle, error) {
-	h, err := f.node.Open(uint32(req.Flags))
-	return &FileHandle{handle: h}, err
+	err := f.node.Open(uint32(req.Flags))
+	return &FileHandle{handle: f.node.FileHandle}, err
 }
 
 func (fh *FileHandle) Write(ctx context.Context, req *fuse.WriteRequest, res *fuse.WriteResponse) error {
+	if fh.handle.Flags&syscall.O_APPEND > 0 {
+		var err error
+		req.Offset, err = fh.node.getSize()
+		if err != nil {
+			return err
+		}
+	}
+
 	n, err := fh.handle.Write(req.Offset, req.Data)
 	res.Size = int(n)
 

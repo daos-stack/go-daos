@@ -143,14 +143,17 @@ func NewFileSystem(group, pool, container string) (*FileSystem, error) {
 		if _, err = fs.DeclareObject(fs.root.Oid, daos.ClassTinyRW); err != nil {
 			return nil, err
 		}
+		now := time.Now()
 		rootAttr := &Attr{
 			Mode:  os.ModeDir | 0755,
 			Uid:   uint32(os.Getuid()),
 			Gid:   uint32(os.Getgid()),
-			Mtime: time.Now(),
+			Atime: now,
+			Mtime: now,
+			Ctime: now,
 		}
 		err = fs.em.withCommit(func(e daos.Epoch) error {
-			return fs.root.writeAttr(e, rootAttr)
+			return fs.root.writeAttr(e, rootAttr, WriteAttrAll)
 		})
 	} else {
 		_, err = fs.OpenObject(fs.root.Oid)
@@ -297,7 +300,7 @@ func (fs *FileSystem) GetNode(oid *daos.ObjectID, epoch *daos.Epoch) (*Node, err
 		fs:        fs,
 	}
 
-	attr, err := node.Attr()
+	attr, err := node.GetAttr()
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to get node attributes")
 	}

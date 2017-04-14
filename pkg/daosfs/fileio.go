@@ -14,42 +14,83 @@ import (
 
 // FileHandle encapsulates functionality for performing file i/o
 type FileHandle struct {
-	node *Node
+	node      *Node
+	readEpoch *daos.Epoch
+	writeTx   *WriteTransaction
 
 	Flags uint32
 }
 
-// NewFileHandle returns a FileHandle for file i/o
-func NewFileHandle(node *Node, flags uint32) *FileHandle {
+// NewReadHandle returns a *FileHandle for file reads at the given epoch
+func NewReadHandle(node *Node, epoch *daos.Epoch, flags uint32) *FileHandle {
 	return &FileHandle{
-		node:  node,
-		Flags: flags,
+		node:      node,
+		readEpoch: epoch,
+		Flags:     flags,
 	}
 }
 
+// NewWriteHandle returns a *FileHandle for file writes with the given
+// transaction.
+func NewWriteHandle(node *Node, tx *WriteTransaction, flags uint32) *FileHandle {
+	return &FileHandle{
+		node:    node,
+		writeTx: tx,
+		Flags:   flags,
+	}
+}
+
+// NewReadWriteHandle returns a *FileHandle for file writes with the given
+// transaction and reads at that transaction's epoch.
+func NewReadWriteHandle(node *Node, tx *WriteTransaction, flags uint32) *FileHandle {
+	return &FileHandle{
+		node:      node,
+		writeTx:   tx,
+		readEpoch: &tx.Epoch, // TODO: This or GHCE?
+		Flags:     flags,
+	}
+}
+
+// Commit commits the write transaction, if one exists
+func (fh *FileHandle) Commit() {
+	if fh.writeTx != nil {
+		fh.writeTx.Commit()
+	}
+}
+
+// Close completes the write transaction, if one exists
+func (fh *FileHandle) Close() (err error) {
+	if fh.writeTx != nil {
+		err = fh.writeTx.Complete()
+	}
+	fh.writeTx = nil
+
+	return
+}
+
+// CanRead indicates whether or not the *FileHandle is in a state for
+// reading data
+func (fh *FileHandle) CanRead() bool {
+	return fh.readEpoch != nil
+}
+
+// CanWrite indicates whether or not the *FileHandle is in a state for
+// writing data
+func (fh *FileHandle) CanWrite() bool {
+	return fh.writeTx != nil
+}
+
 func (fh *FileHandle) Write(offset int64, data []byte) (int64, error) {
+	if !fh.CanWrite() {
+		debug.Print("Write() on filehandle with no tx")
+		return 0, syscall.EBADFD
+	}
+
 	if fh.node.IsSnapshot() {
 		return 0, unix.EPERM
 	}
-	var curSize int64
-	if fh.Flags&syscall.O_APPEND > 0 {
-		var err error
-		curSize, err = fh.node.getSize()
-		if err != nil {
-			return 0, err
-		}
-		offset = curSize
-	}
 
-	tx, err := fh.node.fs.GetWriteTransaction()
-	if err != nil {
-		return 0, err
-	}
-	defer func() {
-		tx.Complete()
-	}()
-
-	debug.Printf("Writing %d bytes @ offset %d to %s (%s)", len(data), offset, fh.node.Oid, fh.node.Name)
+	debug.Printf("Writing %d bytes @ offset %d to %s (%s) (epoch %d)", len(data), offset, fh.node.Oid, fh.node.Name, fh.writeTx.Epoch)
 
 	oh, err := fh.node.oh()
 	if err != nil {
@@ -65,16 +106,22 @@ func (fh *FileHandle) Write(offset int64, data []byte) (int64, error) {
 		Offset: offset,
 	})
 	oa := daos.NewArray(oh.OH())
-	var total int64
-	if total, err = oa.Write(tx.Epoch, ar); err != nil {
+	var wrote int64
+	if wrote, err = oa.Write(fh.writeTx.Epoch, ar); err != nil {
 		return 0, err
+	}
+
+	// Writing 0 bytes is not an error, but we don't want to update
+	// the metadata in that case.
+	if wrote == 0 {
+		return 0, nil
 	}
 
 	// Update the metadata
 	var keys []*daos.KeyRequest
 	keys = append(keys, daos.NewKeyRequest([]byte("Size")))
 	buf := make([]byte, 8)
-	binary.LittleEndian.PutUint64(buf, uint64(curSize+int64(len(data))))
+	binary.LittleEndian.PutUint64(buf, uint64(offset+wrote))
 	keys[0].Put(0, 1, 8, buf)
 
 	mtime, err := time.Now().MarshalBinary()
@@ -84,15 +131,19 @@ func (fh *FileHandle) Write(offset int64, data []byte) (int64, error) {
 	keys = append(keys, daos.NewKeyRequest([]byte("Mtime")))
 	keys[1].Put(0, 1, uint64(len(mtime)), mtime)
 
-	if err := oh.Update(tx.Epoch, []byte("."), keys); err != nil {
+	if err := oh.Update(fh.writeTx.Epoch, []byte("."), keys); err != nil {
 		return 0, err
 	}
 
-	tx.Commit()
-	return total, nil
+	return wrote, nil
 }
 
 func (fh *FileHandle) Read(offset, size int64, data []byte) (int64, error) {
+	if !fh.CanRead() {
+		debug.Print("Read() on fh with no read epoch")
+		return 0, syscall.EBADFD
+	}
+
 	actualSize, err := fh.node.getSize()
 	if err != nil {
 		return 0, err
@@ -101,7 +152,7 @@ func (fh *FileHandle) Read(offset, size int64, data []byte) (int64, error) {
 		size = actualSize
 	}
 
-	debug.Printf("Reading %d bytes @ offset %d from %s (%s)", size, offset, fh.node.Oid, fh.node.Name)
+	debug.Printf("Reading %d bytes @ offset %d from %s (%s) (epoch %d)", size, offset, fh.node.Oid, fh.node.Name, *fh.readEpoch)
 
 	oh, err := fh.node.oh()
 	if err != nil {
@@ -118,5 +169,6 @@ func (fh *FileHandle) Read(offset, size int64, data []byte) (int64, error) {
 	})
 	oa := daos.NewArray(oh.OH())
 
-	return oa.Read(fh.node.Epoch(), ar)
+	// TODO: Update Atime?
+	return oa.Read(*fh.readEpoch, ar)
 }

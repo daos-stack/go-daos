@@ -17,6 +17,25 @@ import (
 	"github.com/pkg/errors"
 )
 
+const (
+	// WriteAttrMode indicates that Mode was set
+	WriteAttrMode = 1 << iota
+	// WriteAttrUID indicates that UID was set
+	WriteAttrUID
+	// WriteAttrGID indicates that GID was set
+	WriteAttrGID
+	// WriteAttrMtime indicates that Mtime was set
+	WriteAttrMtime
+	// WriteAttrAtime indicates that Atime was set
+	WriteAttrAtime
+	// WriteAttrSize indicates that Size was set
+	WriteAttrSize
+	// WriteAttrCtime indicates that Ctime was set
+	WriteAttrCtime
+	// WriteAttrAll indicates that all known fields were set
+	WriteAttrAll = 0xFF
+)
+
 // Attr represents a Node's file attributes
 type Attr struct {
 	Device  uint32
@@ -89,9 +108,10 @@ type Node struct {
 	modeType  os.FileMode
 	readEpoch *daos.Epoch
 
-	Parent *Node
-	Oid    *daos.ObjectID
-	Name   string
+	FileHandle *FileHandle
+	Parent     *Node
+	Oid        *daos.ObjectID
+	Name       string
 }
 
 // DirEntry holds information about the child of a directory Node
@@ -139,7 +159,7 @@ func (n *Node) withReadHandle(fn func(oh *LockableObjectHandle) (interface{}, er
 
 func (n *Node) getSize() (int64, error) {
 	size, err := n.withReadHandle(func(oh *LockableObjectHandle) (interface{}, error) {
-		val, err := oh.Get(n.fs.GetReadEpoch(), ".", "Size")
+		val, err := oh.Get(n.Epoch(), ".", "Size")
 		if err != nil {
 			return 0, errors.Wrapf(err, "Failed to fetch ./Size on %s", n.Oid)
 		}
@@ -222,30 +242,56 @@ func (n *Node) writeEntry(epoch daos.Epoch, name string, dentry *DirEntry) error
 	})
 }
 
-func (n *Node) writeAttr(epoch daos.Epoch, attr *Attr) error {
+func (n *Node) writeAttr(epoch daos.Epoch, attr *Attr, mask uint32) error {
 	kv := make(map[string][]byte)
 
-	buf := make([]byte, 4)
-	binary.LittleEndian.PutUint32(buf, uint32(attr.Mode))
-	kv["Mode"] = buf
-
-	buf = make([]byte, 4)
-	binary.LittleEndian.PutUint32(buf, attr.Uid)
-	kv["Uid"] = buf
-
-	buf = make([]byte, 4)
-	binary.LittleEndian.PutUint32(buf, attr.Gid)
-	kv["Gid"] = buf
-
-	buf = make([]byte, 8)
-	binary.LittleEndian.PutUint64(buf, uint64(attr.Size))
-	kv["Size"] = buf
-
-	mtime, err := attr.Mtime.MarshalBinary()
-	if err != nil {
-		return err
+	if mask&WriteAttrMode != 0 {
+		buf := make([]byte, 4)
+		binary.LittleEndian.PutUint32(buf, uint32(attr.Mode))
+		kv["Mode"] = buf
 	}
-	kv["Mtime"] = mtime
+
+	if mask&WriteAttrUID != 0 {
+		buf := make([]byte, 4)
+		binary.LittleEndian.PutUint32(buf, attr.Uid)
+		kv["Uid"] = buf
+	}
+
+	if mask&WriteAttrGID != 0 {
+		buf := make([]byte, 4)
+		binary.LittleEndian.PutUint32(buf, attr.Gid)
+		kv["Gid"] = buf
+	}
+
+	if mask&WriteAttrSize != 0 {
+		buf := make([]byte, 8)
+		binary.LittleEndian.PutUint64(buf, uint64(attr.Size))
+		kv["Size"] = buf
+	}
+
+	if mask&WriteAttrAtime != 0 {
+		atime, err := attr.Atime.MarshalBinary()
+		if err != nil {
+			return err
+		}
+		kv["Atime"] = atime
+	}
+
+	if mask&WriteAttrMtime != 0 {
+		mtime, err := attr.Mtime.MarshalBinary()
+		if err != nil {
+			return err
+		}
+		kv["Mtime"] = mtime
+	}
+
+	if mask&WriteAttrCtime != 0 {
+		ctime, err := attr.Ctime.MarshalBinary()
+		if err != nil {
+			return err
+		}
+		kv["Ctime"] = ctime
+	}
 
 	return n.withWriteHandle(func(oh *LockableObjectHandle) error {
 		return errors.Wrapf(oh.PutKeys(epoch, ".", kv),
@@ -253,8 +299,27 @@ func (n *Node) writeAttr(epoch daos.Epoch, attr *Attr) error {
 	})
 }
 
-// Attr retrieves the latest attributes for a node
-func (n *Node) Attr() (*Attr, error) {
+// SetAttr sets attributes for a node
+func (n *Node) SetAttr(attr *Attr, mask uint32) error {
+	tx, err := n.fs.GetWriteTransaction()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		tx.Complete()
+	}()
+
+	err = n.writeAttr(tx.Epoch, attr, mask)
+	if err != nil {
+		return errors.Wrap(err, "Failed to write attributes")
+	}
+
+	tx.Commit()
+	return nil
+}
+
+// GetAttr retrieves the latest attributes for a node
+func (n *Node) GetAttr() (*Attr, error) {
 	da := &Attr{
 		Inode:  n.Inode(),
 		Device: n.fs.Device(),
@@ -262,7 +327,7 @@ func (n *Node) Attr() (*Attr, error) {
 
 	dkey := "."
 	kvi, err := n.withReadHandle(func(oh *LockableObjectHandle) (interface{}, error) {
-		kv, err := oh.GetKeys(n.Epoch(), dkey, []string{"Size", "Mtime", "Mode", "Uid", "Gid"})
+		kv, err := oh.GetKeys(n.Epoch(), dkey, []string{"Size", "Atime", "Mtime", "Ctime", "Mode", "Uid", "Gid"})
 		return kv, errors.Wrapf(err, "get attrs for node %s", dkey)
 	})
 	if err != nil {
@@ -282,9 +347,17 @@ func (n *Node) Attr() (*Attr, error) {
 				return nil, errors.Errorf("%d overflows int64", size)
 			}
 			da.Size = int64(size)
+		case "Atime":
+			if err := da.Atime.UnmarshalBinary(val); err != nil {
+				return nil, errors.Wrap(err, "Unable to decode Atime")
+			}
 		case "Mtime":
 			if err := da.Mtime.UnmarshalBinary(val); err != nil {
 				return nil, errors.Wrap(err, "Unable to decode Mtime")
+			}
+		case "Ctime":
+			if err := da.Ctime.UnmarshalBinary(val); err != nil {
+				return nil, errors.Wrap(err, "Unable to decode Ctime")
 			}
 		case "Mode":
 			da.Mode = os.FileMode(binary.LittleEndian.Uint32(val))
@@ -294,9 +367,6 @@ func (n *Node) Attr() (*Attr, error) {
 			da.Gid = binary.LittleEndian.Uint32(val)
 		}
 	}
-	// TODO: Properly support atime/ctime
-	da.Atime = da.Mtime
-	da.Ctime = da.Mtime
 
 	return da, nil
 }
@@ -519,14 +589,17 @@ func (n *Node) createChild(uid, gid uint32, mode os.FileMode, name string) (*Nod
 	}
 	debug.Printf("Created new child object %s", child)
 
+	now := time.Now()
 	attr := &Attr{
 		Mode:  mode,
 		Uid:   uid,
 		Gid:   gid,
-		Mtime: time.Now(),
+		Atime: now,
+		Mtime: now,
+		Ctime: now,
 	}
 
-	err = child.writeAttr(tx.Epoch, attr)
+	err = child.writeAttr(tx.Epoch, attr, WriteAttrAll)
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to write attributes")
 	}
@@ -542,16 +615,71 @@ func (n *Node) Mkdir(req *MkdirRequest) (*Node, error) {
 	return n.createChild(req.Uid, req.Gid, req.Mode, req.Name)
 }
 
-// Create attempts to create a new child node and returns a filehandle to it
-func (n *Node) Create(req *CreateRequest) (*Node, *FileHandle, error) {
-	child, err := n.createChild(req.Uid, req.Gid, req.Mode, req.Name)
-
-	return child, &FileHandle{node: child, Flags: req.Flags}, err
+// Create attempts to create a new child node
+func (n *Node) Create(req *CreateRequest) (*Node, error) {
+	debug.Printf("Create(%v)", req)
+	return n.createChild(req.Uid, req.Gid, req.Mode, req.Name)
 }
 
-// Open returns a filehandle
-func (n *Node) Open(flags uint32) (*FileHandle, error) {
-	return NewFileHandle(n, flags), nil
+// Open creates a filehandle if the node is a regular file
+func (n *Node) Open(flags uint32) error {
+	if n.Type() == os.ModeDir {
+		return syscall.EISDIR
+	}
+	debug.Printf("Open(0x%x) (%b)", flags, flags)
+
+	if n.FileHandle != nil {
+		if n.FileHandle.Flags == flags {
+			return nil
+		}
+		debug.Printf("Reopen? cur 0x%x -> new 0x%x", n.FileHandle.Flags, flags)
+	}
+
+	// FIXME: All filehandles should be able to read, so get rid of
+	// read/readwrite handles. The only distinction is whether or
+	// not the thing can write because it has a tx.
+	if flags&(syscall.O_RDWR|syscall.O_WRONLY|syscall.O_APPEND) != 0 {
+		if n.IsSnapshot() {
+			return errors.New("Can't write to snapshot")
+		}
+		if n.FileHandle != nil && n.FileHandle.CanWrite() {
+			// Don't get another write tx.
+			return nil
+		}
+		tx, err := n.fs.GetWriteTransaction()
+		if err != nil {
+			return err
+		}
+		if flags&syscall.O_WRONLY != 0 {
+			n.FileHandle = NewWriteHandle(n, tx, flags)
+			return nil
+		}
+		n.FileHandle = NewReadWriteHandle(n, tx, flags)
+		return nil
+	}
+
+	readEpoch := n.Epoch()
+	n.FileHandle = NewReadHandle(n, &readEpoch, flags)
+
+	return nil
+}
+
+// IsOpen indicates whether or not the node has been opened as a file
+func (n *Node) IsOpen() bool {
+	return n.FileHandle != nil
+}
+
+// Close closes the node's filehandle
+func (n *Node) Close() (err error) {
+	if n.FileHandle == nil {
+		// TODO: Should this actually be an error?
+		return errors.New("Close() on nil filehandle")
+	}
+
+	if err = n.FileHandle.Close(); err == nil {
+		n.FileHandle = nil
+	}
+	return
 }
 
 func (n *Node) destroyChild(child *Node) error {

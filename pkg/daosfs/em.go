@@ -122,8 +122,10 @@ func (em *epochManager) Commit(e daos.Epoch) error {
 			delete(em.holds, epoch)
 			em.updateEpochs(s)
 		}
+		return nil
 	}
 
+	debug.Printf("Leaving Commit(), epoch %d has %d holds", e, em.holds[e])
 	return nil
 }
 

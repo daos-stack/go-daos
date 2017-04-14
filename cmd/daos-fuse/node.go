@@ -17,7 +17,7 @@ type Node struct {
 
 // Attr implements the base fs.Node interface
 func (n *Node) Attr(ctx context.Context, attr *fuse.Attr) error {
-	da, err := n.node.Attr()
+	da, err := n.node.GetAttr()
 	if err != nil {
 		debug.Printf("error in Attr(): %s", err)
 		return errors.Wrap(err, "Failed to get DAOS Node attributes")
@@ -25,16 +25,16 @@ func (n *Node) Attr(ctx context.Context, attr *fuse.Attr) error {
 
 	attr.Inode = da.Inode
 	attr.Size = uint64(da.Size)
-	//attr.Blocks = da.Blocks
-	//attr.Atime = da.Atime
+	attr.Blocks = da.Blocks
+	attr.Atime = da.Atime
 	attr.Mtime = da.Mtime
-	//attr.Ctime = da.Ctime
+	attr.Ctime = da.Ctime
 	attr.Mode = da.Mode
-	//attr.Nlink = da.Nlink
+	attr.Nlink = da.Nlink
 	attr.Uid = da.Uid
 	attr.Gid = da.Gid
-	//attr.Rdev = da.Rdev
-	//attr.Blocksize = da.Blocksize
+	attr.Rdev = da.Rdev
+	attr.Blocksize = da.Blocksize
 
 	return nil
 }
