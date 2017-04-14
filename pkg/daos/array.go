@@ -130,11 +130,11 @@ func (a *Array) Close() error {
 func (a *Array) Read(e Epoch, req *ArrayRequest) (int64, error) {
 	var total int64
 
-	dar, free, err := req.Native()
+	dar, freeReq, err := req.Native()
 	if err != nil {
 		return 0, err
 	}
-	defer free()
+	defer freeReq()
 
 	// Create 1 SGL for each range in the request. Unfortunately,
 	// we can't have C code writing directly into Go-allocated buffers,
@@ -159,12 +159,11 @@ func (a *Array) Read(e Epoch, req *ArrayRequest) (int64, error) {
 	// Now that we've got data in the SGL buffers, we need to copy it
 	// back into Go.
 	for i, bufs := range req.Buffers() {
-		nr := int(sgls[i].sg_nr.num_out)
-		if nr == 0 {
+		if int(sgls[i].sg_nr.num_out) == 0 {
 			continue
 		}
-		iolist := (*[1 << 30]C.daos_iov_t)(unsafe.Pointer(sgls[i].sg_iovs))[:nr:nr]
-		for j := 0; j < nr; j++ {
+		iolist := (*[1 << 30]C.daos_iov_t)(unsafe.Pointer(sgls[i].sg_iovs))[:len(bufs):len(bufs)]
+		for j := 0; j < len(bufs); j++ {
 			iovlen := C.int(iolist[j].iov_len)
 			if int(iovlen) > cap(bufs[j]) {
 				return 0, errors.Errorf("Can't copy IOV with length %d into buffer with cap %d", iovlen, cap(bufs[j]))
