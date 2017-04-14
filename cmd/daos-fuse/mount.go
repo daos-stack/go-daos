@@ -36,7 +36,7 @@ func mount(group, pool, name, mountpoint string) error {
 	filesystem := &FS{
 		dfs: dfs,
 	}
-	root := NewDir(dfs.Root())
+	root := NewNode(dfs.Root())
 	filesystem.root = root
 	if err := srv.Serve(filesystem); err != nil {
 		return err

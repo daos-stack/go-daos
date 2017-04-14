@@ -157,7 +157,10 @@ func (n *Node) withReadHandle(fn func(oh *LockableObjectHandle) (interface{}, er
 	return fn(oh)
 }
 
-func (n *Node) getSize() (int64, error) {
+// GetSize returns the current Size attribute
+// FIXME: It would probably be better to make a more flexible version of
+// GetAttr() to specify desired attributes by mask or whatever.
+func (n *Node) GetSize() (int64, error) {
 	size, err := n.withReadHandle(func(oh *LockableObjectHandle) (interface{}, error) {
 		val, err := oh.Get(n.Epoch(), ".", "Size")
 		if err != nil {
@@ -445,7 +448,7 @@ func (n *Node) Inode() uint64 {
 func (n *Node) Children() ([]*DirEntry, error) {
 	var children []*DirEntry
 
-	if n.Type() != os.ModeDir {
+	if !n.Type().IsDir() {
 		return nil, unix.ENOTDIR
 	}
 
@@ -496,6 +499,9 @@ func (n *Node) IsRoot() bool {
 // returns a *daos.Node if found
 func (n *Node) Lookup(name string) (*Node, error) {
 	debug.Printf("looking up %s under %q (%s)", name, n.Name, n.Oid)
+	if !n.Type().IsDir() {
+		return nil, syscall.ENOTDIR
+	}
 
 	name = filepath.Clean(name)
 	if n.IsRoot() {
@@ -545,6 +551,10 @@ func (n *Node) Lookup(name string) (*Node, error) {
 }
 
 func (n *Node) createChild(uid, gid uint32, mode os.FileMode, name string) (*Node, error) {
+	if !n.Type().IsDir() {
+		return nil, syscall.ENOTDIR
+	}
+
 	if child, _ := n.Lookup(name); child != nil {
 		debug.Printf("In Mkdir(): %s already exists!", name)
 		return nil, unix.EEXIST
@@ -610,23 +620,30 @@ func (n *Node) createChild(uid, gid uint32, mode os.FileMode, name string) (*Nod
 	return child, nil
 }
 
-// Mkdir attempts to create a new child Node
+// Mkdir attempts to create a new child directory
 func (n *Node) Mkdir(req *MkdirRequest) (*Node, error) {
 	return n.createChild(req.Uid, req.Gid, req.Mode, req.Name)
 }
 
-// Create attempts to create a new child node
+// Create attempts to create a new child file
 func (n *Node) Create(req *CreateRequest) (*Node, error) {
 	debug.Printf("Create(%v)", req)
-	return n.createChild(req.Uid, req.Gid, req.Mode, req.Name)
+	child, err := n.createChild(req.Uid, req.Gid, req.Mode, req.Name)
+	if err != nil {
+		return nil, err
+	}
+	return child, child.Open(req.Flags)
 }
 
 // Open creates a filehandle if the node is a regular file
 func (n *Node) Open(flags uint32) error {
-	if n.Type() == os.ModeDir {
-		return syscall.EISDIR
-	}
 	debug.Printf("Open(0x%x) (%b)", flags, flags)
+	if n.Type().IsDir() {
+		if flags&syscall.O_DIRECTORY == 0 {
+			return syscall.EISDIR
+		}
+		return nil
+	}
 
 	if n.FileHandle != nil {
 		if n.FileHandle.Flags == flags {
@@ -713,7 +730,7 @@ func (n *Node) Unlink(name string) error {
 		return err
 	}
 
-	if child.Type() == os.ModeDir {
+	if child.Type().IsDir() {
 		return unix.EISDIR
 	}
 
@@ -727,7 +744,7 @@ func (n *Node) Rmdir(name string) error {
 		return err
 	}
 
-	if child.Type() != os.ModeDir {
+	if !child.Type().IsDir() {
 		return unix.ENOTDIR
 	}
 

@@ -144,7 +144,7 @@ func (fh *FileHandle) Read(offset, size int64, data []byte) (int64, error) {
 		return 0, syscall.EBADFD
 	}
 
-	actualSize, err := fh.node.getSize()
+	actualSize, err := fh.node.GetSize()
 	if err != nil {
 		return 0, err
 	}

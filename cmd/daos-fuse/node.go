@@ -10,12 +10,17 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Node wraps a *daosfs.Node
+// Node wraps a *daosfs.Node and implements the non-FileHandle interfaces
 type Node struct {
 	node *daosfs.Node
 }
 
-// Attr implements the base fs.Node interface
+// NewNode returns a new *Node to wrap the supplied *daosfs.Node
+func NewNode(node *daosfs.Node) *Node {
+	return &Node{node: node}
+}
+
+// Attr retrives the node's attributes and converts them to a *fuse.Attr
 func (n *Node) Attr(ctx context.Context, attr *fuse.Attr) error {
 	da, err := n.node.GetAttr()
 	if err != nil {
@@ -25,16 +30,16 @@ func (n *Node) Attr(ctx context.Context, attr *fuse.Attr) error {
 
 	attr.Inode = da.Inode
 	attr.Size = uint64(da.Size)
-	attr.Blocks = da.Blocks
+	attr.Blocks = uint64(da.Blocks)
 	attr.Atime = da.Atime
 	attr.Mtime = da.Mtime
 	attr.Ctime = da.Ctime
 	attr.Mode = da.Mode
-	attr.Nlink = da.Nlink
+	attr.Nlink = uint32(da.Nlink)
 	attr.Uid = da.Uid
 	attr.Gid = da.Gid
-	attr.Rdev = da.Rdev
-	attr.Blocksize = da.Blocksize
+	attr.Rdev = uint32(da.Rdev)
+	attr.BlockSize = uint32(da.Blksize)
 
 	return nil
 }
