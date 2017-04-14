@@ -1,6 +1,8 @@
 package daosfs
 
 import (
+	"encoding/binary"
+	"hash/fnv"
 	"os"
 	"sync"
 	"time"
@@ -75,6 +77,7 @@ type FileSystem struct {
 	og   *oidGenerator
 	hc   *lru.TwoQueueCache
 	em   *epochManager
+	id   uint32
 }
 
 // NewFileSystem connects to the given pool and creates a container
@@ -152,6 +155,9 @@ func NewFileSystem(group, pool, container string) (*FileSystem, error) {
 	} else {
 		_, err = fs.OpenObject(fs.root.oid)
 	}
+
+	// Not sure if this is entirely correct, but should be good enough.
+	fs.id = binary.LittleEndian.Uint32(fnv.New32().Sum([]byte(pool + fs.Name)))
 
 	return fs, err
 }
@@ -275,6 +281,12 @@ func (fs *FileSystem) CloseObject(oid *daos.ObjectID) {
 // Root returns the root node
 func (fs *FileSystem) Root() *Node {
 	return fs.root
+}
+
+// Device returns a uint32 suitable for use as st_dev to identify
+// the filesystem.
+func (fs *FileSystem) Device() uint32 {
+	return fs.id
 }
 
 // Fini shuts everything down

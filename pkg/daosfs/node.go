@@ -16,14 +16,15 @@ import (
 
 // Attr represents a Node's file attributes
 type Attr struct {
-	Inode uint64 // fuse only handles a uint64
-	Size  int64
-	Atime time.Time
-	Mtime time.Time
-	Ctime time.Time
-	Mode  os.FileMode
-	Uid   uint32 // nolint
-	Gid   uint32 // nolint
+	Device uint32
+	Inode  uint64 // fuse only handles a uint64
+	Size   int64
+	Atime  time.Time
+	Mtime  time.Time
+	Ctime  time.Time
+	Mode   os.FileMode
+	Uid    uint32 // nolint
+	Gid    uint32 // nolint
 	// TODO: Implement other fields as necessary
 }
 
@@ -217,7 +218,8 @@ func (n *Node) writeAttr(epoch daos.Epoch, attr *Attr) error {
 // Attr retrieves the latest attributes for a node
 func (n *Node) Attr() (*Attr, error) {
 	da := &Attr{
-		Inode: n.Inode(),
+		Inode:  n.Inode(),
+		Device: n.fs.Device(),
 	}
 
 	dkey := "."
