@@ -46,10 +46,7 @@ type (
 // Init initializes the DAOS connection
 func Init() error {
 	rc, err := C.daos_init()
-	if rc != 0 {
-		return errors.Wrapf(err, "init failed %d, ", rc)
-	}
-	return nil
+	return rc2err("daos_init", rc, err)
 }
 
 // Fini shutsdown DAOS connection
