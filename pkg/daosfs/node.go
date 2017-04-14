@@ -538,14 +538,14 @@ func (n *Node) Mkdir(req *MkdirRequest) (*Node, error) {
 	return n.createChild(req.Uid, req.Gid, req.Mode, req.Name)
 }
 
-// Create attempts to create a new child node and returns a fileoh to it
+// Create attempts to create a new child node and returns a filehandle to it
 func (n *Node) Create(req *CreateRequest) (*Node, *FileHandle, error) {
 	child, err := n.createChild(req.Uid, req.Gid, req.Mode, req.Name)
 
 	return child, &FileHandle{node: child, Flags: req.Flags}, err
 }
 
-// Open returns a fileoh
+// Open returns a filehandle
 func (n *Node) Open(flags uint32) (*FileHandle, error) {
 	return NewFileHandle(n, flags), nil
 }
@@ -574,29 +574,37 @@ func (n *Node) destroyChild(child *Node) error {
 	return nil
 }
 
-// Remove punches the object and ... ?
-func (n *Node) Remove(name string, dir bool) error {
+// Unlink removes a file
+func (n *Node) Unlink(name string) error {
 	child, err := n.Lookup(name)
 	if err != nil {
 		return err
 	}
 
-	switch child.Type() {
-	case os.ModeDir:
-		if !dir {
-			return unix.EISDIR
-		}
-		children, err := child.Children()
-		if err != nil {
-			return err
-		}
-		if len(children) != 0 {
-			return unix.ENOTEMPTY
-		}
-	default:
-		if dir {
-			return unix.ENOTDIR
-		}
+	if child.Type() == os.ModeDir {
+		return unix.EISDIR
+	}
+
+	return n.destroyChild(child)
+}
+
+// Rmdir removes a directory
+func (n *Node) Rmdir(name string) error {
+	child, err := n.Lookup(name)
+	if err != nil {
+		return err
+	}
+
+	if child.Type() != os.ModeDir {
+		return unix.ENOTDIR
+	}
+
+	children, err := child.Children()
+	if err != nil {
+		return err
+	}
+	if len(children) != 0 {
+		return unix.ENOTEMPTY
 	}
 
 	return n.destroyChild(child)

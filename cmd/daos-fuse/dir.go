@@ -109,5 +109,8 @@ func (d *Dir) Create(ctx context.Context, req *fuse.CreateRequest, res *fuse.Cre
 
 // Remove implements unlink/rmdir
 func (d *Dir) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
-	return d.node.Remove(req.Name, req.Dir)
+	if req.Dir {
+		return d.node.Rmdir(req.Name)
+	}
+	return d.node.Unlink(req.Name)
 }
