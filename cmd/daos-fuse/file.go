@@ -47,5 +47,9 @@ func (fh *FileHandle) Write(ctx context.Context, req *fuse.WriteRequest, res *fu
 func (fh *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, res *fuse.ReadResponse) error {
 	read, err := fh.handle.Read(req.Offset, int64(req.Size), res.Data)
 	res.Data = res.Data[:read]
+
+	if err != nil {
+		debug.Printf("error in Read(): %s", err)
+	}
 	return err
 }
