@@ -504,10 +504,11 @@ func (n *Node) createChild(uid, gid uint32, mode os.FileMode, name string) (*Nod
 	}
 
 	child := &Node{
-		Oid:    nextOID,
-		Parent: n,
-		fs:     n.fs,
-		Name:   name,
+		Oid:      nextOID,
+		Parent:   n,
+		fs:       n.fs,
+		modeType: mode & os.ModeType,
+		Name:     name,
 	}
 	if _, err = n.fs.DeclareObjectEpoch(child.Oid, tx.Epoch, objClass); err != nil {
 		return nil, err

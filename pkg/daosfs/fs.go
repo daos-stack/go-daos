@@ -289,6 +289,30 @@ func (fs *FileSystem) Device() uint32 {
 	return fs.id
 }
 
+// GetNode returns a *Node for the given ObjectID and Epoch
+func (fs *FileSystem) GetNode(oid *daos.ObjectID, epoch *daos.Epoch) (*Node, error) {
+	node := &Node{
+		Oid:       oid,
+		readEpoch: epoch,
+		fs:        fs,
+	}
+
+	attr, err := node.Attr()
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to get node attributes")
+	}
+
+	// TODO: Now, here's where things get interesting. At this point,
+	// we've established that the given OID is associated with a
+	// previously-saved Node, but we don't know anything about its name,
+	// parent, etc.
+	node.modeType = attr.Mode & os.ModeType
+	node.Parent = &Node{} // just to avoid nil ptr deref errors
+	node.Name = "help_i_dont_know_who_i_am"
+
+	return node, nil
+}
+
 // Fini shuts everything down
 func (fs *FileSystem) Fini() error {
 	start := time.Now()
