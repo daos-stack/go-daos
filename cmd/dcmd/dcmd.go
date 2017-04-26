@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/daos-stack/go-daos/pkg/orterun"
+	"github.com/intel-hpdd/logging/debug"
 
 	cli "gopkg.in/urfave/cli.v1"
 )
@@ -44,17 +45,17 @@ func myMain() int {
 			Usage: "path to MPI driver cmpatible with DAOS",
 			Value: orterun.DefaultRunner,
 		},
-		// cli.BoolFlag{
-		// 	Name:  "debug",
-		// 	Usage: "Display debug logging to console",
-		// },
+		cli.BoolFlag{
+			Name:  "debug",
+			Usage: "Display debug logging to console",
+		},
 		// cli.StringFlag{
 		// 	Name:  "logfile, l",
 		// 	Usage: "Log tool activity to this file",
 		// 	Value: "",
 		// },
 	}
-	// app.Before = configureLogging
+	app.Before = beforeAll
 
 	if err := app.Run(os.Args); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
@@ -62,6 +63,14 @@ func myMain() int {
 	}
 
 	return 0
+}
+
+func beforeAll(c *cli.Context) error {
+	if c.Bool("debug") {
+		debug.Enable()
+	}
+
+	return nil
 }
 
 func main() {
