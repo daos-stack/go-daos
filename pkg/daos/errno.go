@@ -106,5 +106,5 @@ func (e Error) String() string {
 	if m, ok := Errors[e]; ok {
 		return fmt.Sprintf("%s (%d)", m, int(e))
 	}
-	return fmt.Sprintf("Unkonwn DAOS error (%d)", e)
+	return fmt.Sprintf("Unknown DAOS error (%d)", e)
 }
