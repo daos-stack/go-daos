@@ -205,6 +205,8 @@ func (n *Node) fetchEntry(name string) (*DirEntry, error) {
 		return nil, errors.Errorf("Failed to type-assert %v!?", kvi)
 	}
 
+	debug.Printf("kv: %v", kv)
+
 	var dentry DirEntry
 	dentry.Name = name
 

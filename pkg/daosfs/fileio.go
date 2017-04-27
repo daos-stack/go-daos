@@ -118,20 +118,19 @@ func (fh *FileHandle) Write(offset int64, data []byte) (int64, error) {
 	}
 
 	// Update the metadata
-	var keys []*daos.KeyRequest
-	keys = append(keys, daos.NewKeyRequest([]byte("Size")))
+	ir := daos.NewIoRequest([]byte("."))
+
 	buf := make([]byte, 8)
 	binary.LittleEndian.PutUint64(buf, uint64(offset+wrote))
-	keys[0].Put(0, 1, 8, buf)
+	ir.AddRecordRequest(daos.NewSingleRecordRequest([]byte("Size"), buf))
 
 	mtime, err := time.Now().MarshalBinary()
 	if err != nil {
 		return 0, errors.Wrap(err, "Failed to marshal time.Now()")
 	}
-	keys = append(keys, daos.NewKeyRequest([]byte("Mtime")))
-	keys[1].Put(0, 1, uint64(len(mtime)), mtime)
+	ir.AddRecordRequest(daos.NewSingleRecordRequest([]byte("Mtime"), mtime))
 
-	if err := oh.Update(fh.writeTx.Epoch, []byte("."), keys); err != nil {
+	if err := oh.Update(fh.writeTx.Epoch, ir); err != nil {
 		return 0, err
 	}
 

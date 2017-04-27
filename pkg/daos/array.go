@@ -136,42 +136,19 @@ func (a *Array) Read(e Epoch, req *ArrayRequest) (int64, error) {
 	}
 	defer freeReq()
 
-	// Create 1 SGL for each range in the request. Unfortunately,
-	// we can't have C code writing directly into Go-allocated buffers,
-	// so we have to malloc() some in C-land and then copy back into Go.
-	sgls := SGListSlice(make([]SGList, len(req.Ranges)))
-	for i, br := range req.Ranges {
-		iovs := allocIOV(1)
-		iolist := (*[1 << 30]C.daos_iov_t)(unsafe.Pointer(iovs))[:1:1]
-		iolist[0].iov_len = C.daos_size_t(br.Length)
-		iolist[0].iov_buf_len = iolist[0].iov_len
-		iolist[0].iov_buf = C.malloc(C.size_t(iolist[0].iov_len))
-		sgls[i].sg_nr.num = C.uint32_t(1)
-		sgls[i].sg_iovs = iovs
-	}
-	defer sgls.Free()
+	sgl := NewSGList(req.Buffers()[0])
+	defer sgl.Free()
 
-	rc, err := C.daos_array_read(a.oh.H(), e.Native(), dar, sgls.Pointer(), nil, nil)
+	rc, err := C.daos_array_read(a.oh.H(), e.Native(), dar, sgl.Pointer(), nil, nil)
 	if err := rc2err("daos_array_read", rc, err); err != nil {
 		return 0, err
 	}
+	if err := sgl.Complete(); err != nil {
+		return 0, err
+	}
 
-	// Now that we've got data in the SGL buffers, we need to copy it
-	// back into Go.
-	for i, bufs := range req.Buffers() {
-		if int(sgls[i].sg_nr.num_out) == 0 {
-			continue
-		}
-		iolist := (*[1 << 30]C.daos_iov_t)(unsafe.Pointer(sgls[i].sg_iovs))[:len(bufs):len(bufs)]
-		for j := 0; j < len(bufs); j++ {
-			iovlen := C.int(iolist[j].iov_len)
-			if int(iovlen) > cap(bufs[j]) {
-				return 0, errors.Errorf("Can't copy IOV with length %d into buffer with cap %d", iovlen, cap(bufs[j]))
-			}
-			n := copy(bufs[j][:iovlen], C.GoBytes(iolist[j].iov_buf, iovlen))
-			bufs[j] = bufs[j][:n]
-			total += int64(n)
-		}
+	for _, buf := range req.Buffers()[0] {
+		total += int64(len(buf))
 	}
 
 	return total, nil
@@ -184,10 +161,10 @@ func (a *Array) Write(e Epoch, req *ArrayRequest) (int64, error) {
 	}
 	defer free()
 
-	sgls := InitSGUpdate(req)
-	defer sgls.Free()
+	sgl := NewSGList(req.Buffers()[0])
+	defer sgl.Free()
 
-	rc, err := C.daos_array_write(a.oh.H(), e.Native(), dar, sgls.Pointer(), nil, nil)
+	rc, err := C.daos_array_write(a.oh.H(), e.Native(), dar, sgl.Pointer(), nil, nil)
 	return req.Size(), rc2err("daos_array_write", rc, err)
 }
 

@@ -271,7 +271,9 @@ func (h *Handle) openMeta(of OpenFlag) (*metaHandle, error) {
 	}
 
 	m.oid = daos.ObjectIDInit(0, 0, 1, daos.ClassLargeRW)
-	m.init()
+	if err := m.init(); err != nil {
+		return nil, err
+	}
 	return m, nil
 
 }

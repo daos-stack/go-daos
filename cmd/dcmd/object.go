@@ -10,6 +10,7 @@ import (
 
 	"github.com/daos-stack/go-daos/pkg/daos"
 	"github.com/daos-stack/go-daos/pkg/ufd"
+	"github.com/intel-hpdd/logging/debug"
 	"github.com/pkg/errors"
 
 	cli "gopkg.in/urfave/cli.v1"
@@ -529,6 +530,7 @@ func objInspect(c *cli.Context) error {
 	} else {
 		dkeys = [][]byte{dkeyArg}
 	}
+	debug.Printf("dkeys: %s", dkeys)
 
 	for _, dkey := range dkeys {
 		var akeys [][]byte
@@ -540,6 +542,7 @@ func objInspect(c *cli.Context) error {
 		} else {
 			akeys = [][]byte{akeyArg}
 		}
+		debug.Printf("akeys: %s", akeys)
 
 		for _, akey := range akeys {
 			recSize, err := inspectKey(oh, epoch, dkey, akey)
@@ -547,6 +550,7 @@ func objInspect(c *cli.Context) error {
 				return errors.Wrap(err, "inspectkey")
 			}
 			if recSize == 0 {
+				debug.Printf("%s/%s is zero", dkey, akey)
 				continue
 			}
 			if c.Bool("hex") {
@@ -583,12 +587,11 @@ func objInspect(c *cli.Context) error {
 }
 
 func inspectKey(oh *daos.ObjectHandle, epoch daos.Epoch, dkey, akey []byte) (uint64, error) {
-	kr := daos.NewKeyRequest(akey)
-	kr.Get(0, 1, daos.RecAny)
+	ir := daos.NewIoRequest(dkey, daos.NewSingleRecordRequest(akey))
 
-	err := oh.Inspect(epoch, dkey, []*daos.KeyRequest{kr})
+	err := oh.Inspect(epoch, ir)
 	if err != nil {
 		return 0, errors.Wrap(err, "Inspect")
 	}
-	return kr.Extents[0].RecSize, nil
+	return uint64(len(ir.Records[0].Buffers()[0])), nil
 }

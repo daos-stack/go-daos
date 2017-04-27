@@ -16,8 +16,19 @@ import (
 	"strings"
 	"unsafe"
 
+	"github.com/intel-hpdd/logging/debug"
 	"github.com/pborman/uuid"
 	"github.com/pkg/errors"
+)
+
+const (
+	// RecAny signals that the record needs to be prefetched in order
+	// to determine its size
+	RecAny = C.DAOS_REC_ANY
+	// EpochMax is the highest possible epoch -- usually used in read
+	// operations to get the latest data regardless of what's committed
+	// NB: Can't use C.DAOS_EPOCH_MAX because it's interpreted as -1
+	EpochMax = Epoch(1<<64 - 1)
 )
 
 type (
@@ -160,6 +171,7 @@ func PoolDestroy(pool string, group string, force int) error {
 	return rc2err("daos_pool_destroy", rc, err)
 }
 
+// UUID returns the Pool's UUID as a string
 func (info *PoolInfo) UUID() string {
 	if info == nil {
 		return ""
@@ -167,6 +179,7 @@ func (info *PoolInfo) UUID() string {
 	return uuid2str(info.pi_uuid[:])
 }
 
+// NumTargets returns the number of targets in the Pool
 func (info *PoolInfo) NumTargets() int {
 	if info == nil {
 		return 0
@@ -174,6 +187,7 @@ func (info *PoolInfo) NumTargets() int {
 	return int(info.pi_ntargets)
 }
 
+// NumDisabled returns the number of disabled targets in the Pool
 func (info *PoolInfo) NumDisabled() int {
 	if info == nil {
 		return 0
@@ -181,6 +195,7 @@ func (info *PoolInfo) NumDisabled() int {
 	return int(info.pi_ndisabled)
 }
 
+// Mode returns the Pool's operating mode
 func (info *PoolInfo) Mode() uint32 {
 	if info == nil {
 		return 0
@@ -188,6 +203,7 @@ func (info *PoolInfo) Mode() uint32 {
 	return uint32(info.pi_mode)
 }
 
+// Space returns the amount of space allocated for the Pool
 func (info *PoolInfo) Space() uint64 {
 	if info == nil {
 		return 0
@@ -290,8 +306,12 @@ func (poh *PoolHandle) NewContainer(uuid string) error {
 }
 
 const (
-	ContOpenRO     = C.DAOS_COO_RO
-	ContOpenRW     = C.DAOS_COO_RW
+	// ContOpenRO indicates that the container should be opened Read-Only
+	ContOpenRO = C.DAOS_COO_RO
+	// ContOpenRW indicates that the container should be opened Read/Write
+	ContOpenRW = C.DAOS_COO_RW
+	// ContOpenNoSlip indicates that the container should not allow
+	// slip operations to succeed
 	ContOpenNoSlip = C.DAOS_COO_NOSLIP
 )
 
@@ -351,7 +371,7 @@ func (e Epoch) Native() C.daos_epoch_t {
 	return C.daos_epoch_t(e)
 }
 
-// Native returns native C-type epoch
+// Pointer returns a pointer to the native C-type epoch
 func (e *Epoch) Pointer() *C.daos_epoch_t {
 	return (*C.daos_epoch_t)(e)
 }
@@ -382,6 +402,7 @@ func (coh *ContHandle) Info() (*ContInfo, error) {
 	return &info, nil
 }
 
+// UUID returns the container's UUID as a string
 func (info *ContInfo) UUID() string {
 	if info == nil {
 		return ""
@@ -389,6 +410,7 @@ func (info *ContInfo) UUID() string {
 	return uuid2str(info.ci_uuid[:])
 }
 
+// EpochState returns a pointer to the container's current EpochState
 func (info *ContInfo) EpochState() *EpochState {
 	if info == nil {
 		return nil
@@ -397,6 +419,7 @@ func (info *ContInfo) EpochState() *EpochState {
 	return &es
 }
 
+// Snapshots returns a slice of Epochs representing stable snapshots
 func (info *ContInfo) Snapshots() []Epoch {
 	if info == nil {
 		return nil
@@ -556,36 +579,46 @@ func (coh *ContHandle) EpochWait(e Epoch) (*EpochState, error) {
 
 }
 
+// Hash wraps a C.daos_hash_out_t
 type Hash C.daos_hash_out_t
 
+// OClassID wraps a C.daos_oclass_id_t
 type OClassID C.daos_oclass_id_t
+
+// ObjectID wraps a C.daos_obj_id_t
 type ObjectID C.daos_obj_id_t
 
 func (o ObjectID) String() string {
 	return fmt.Sprintf("0x%x.0x%x.0x%x", o.hi, o.mid, o.lo)
 }
 
+// Native returns a C.daos_obj_id_t
 func (o *ObjectID) Native() C.daos_obj_id_t {
 	return C.daos_obj_id_t(*o)
 }
 
+// Pointer returns a pointer to a C.daos_obj_id_t
 func (o *ObjectID) Pointer() *C.daos_obj_id_t {
 	return (*C.daos_obj_id_t)(o)
 }
 
+// Hi returns the top part of the ObjectID
 func (o *ObjectID) Hi() uint32 {
 	// top half of .hi is reserved
 	return uint32(o.hi)
 }
 
+// Mid returns the middle part of the ObjectID
 func (o *ObjectID) Mid() uint64 {
 	return uint64(o.mid)
 }
 
+// Lo returns the lower part of the ObjectID
 func (o *ObjectID) Lo() uint64 {
 	return uint64(o.lo)
 }
 
+// Class returns the OClassID for the ObjectID
 func (o *ObjectID) Class() OClassID {
 	c := C.daos_obj_id2class(o.Native())
 	return OClassID(c)
@@ -655,10 +688,12 @@ func (o *ObjectID) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
+// MarshalJSON marshals the ObjectID to a JSON-formatted []byte
 func (o *ObjectID) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + o.String() + `"`), nil
 }
 
+// UnmarshalJSON unmarshals the ObjectID from a JSON-formatted []byte
 func (o *ObjectID) UnmarshalJSON(b []byte) error {
 	if b[0] == '"' {
 		b = b[1 : len(b)-1]
@@ -671,6 +706,8 @@ func (o *ObjectID) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// Set attempts to parse the supplied string as an ObjectID and replaces
+// the pointer if successful
 func (o *ObjectID) Set(value string) error {
 	oid, err := ParseOID(value)
 	if err != nil {
@@ -680,6 +717,7 @@ func (o *ObjectID) Set(value string) error {
 	return nil
 }
 
+// ParseOID attempts to parse the supplied string as an ObjectID
 func ParseOID(s string) (*ObjectID, error) {
 	var oc OClassID
 	var hi uint32
@@ -726,10 +764,12 @@ func ParseOID(s string) (*ObjectID, error) {
 	return ObjectIDInit(hi, mid, lo, oc), nil
 }
 
+// Native returns a C.daos_oclass_id_t
 func (c OClassID) Native() C.daos_oclass_id_t {
 	return C.daos_oclass_id_t(c)
 }
 
+// Set attempts to parse the supplied string as an OClassID
 func (c *OClassID) Set(value string) error {
 	for _, cls := range ObjectClassList() {
 		if strings.ToUpper(value) == strings.ToUpper(cls.String()) {
@@ -760,15 +800,22 @@ func (c OClassID) String() string {
 
 const (
 	startOfObjectClasses = ClassUnknown
-	ClassUnknown         = OClassID(C.DAOS_OC_UNKNOWN)
-	ClassTinyRW          = OClassID(C.DAOS_OC_TINY_RW)
-	ClassSmallRW         = OClassID(C.DAOS_OC_SMALL_RW)
-	ClassLargeRW         = OClassID(C.DAOS_OC_LARGE_RW)
-	ClassRepl2RW         = OClassID(C.DAOS_OC_REPL_2_RW)
-	ClassReplMaxRW       = OClassID(C.DAOS_OC_REPL_MAX_RW)
-	endOfObjectClasses   = ClassReplMaxRW
+	// ClassUnknown is an unknown Object Class
+	ClassUnknown = OClassID(C.DAOS_OC_UNKNOWN)
+	// ClassTinyRW is tiny i/o
+	ClassTinyRW = OClassID(C.DAOS_OC_TINY_RW)
+	// ClassSmallRW is mall i/o
+	ClassSmallRW = OClassID(C.DAOS_OC_SMALL_RW)
+	// ClassLargeRW is large i/o
+	ClassLargeRW = OClassID(C.DAOS_OC_LARGE_RW)
+	// ClassRepl2RW is 2-way replicated i/o
+	ClassRepl2RW = OClassID(C.DAOS_OC_REPL_2_RW)
+	// ClassReplMaxRW is fully-replicated i/o
+	ClassReplMaxRW     = OClassID(C.DAOS_OC_REPL_MAX_RW)
+	endOfObjectClasses = ClassReplMaxRW
 )
 
+// ObjectClassList returns a slice of known ObjectClasses
 func ObjectClassList() []OClassID {
 	var classes []OClassID
 	for cls := startOfObjectClasses; cls <= endOfObjectClasses; cls++ {
@@ -799,14 +846,17 @@ func ObjectIDInit(hi uint32, mid, lo uint64, class OClassID) *ObjectID {
 	return &oid
 }
 
+// Pointer returns a *C.daos_obj_attr_t
 func (oa *ObjectAttribute) Pointer() *C.daos_obj_attr_t {
 	return (*C.daos_obj_attr_t)(oa)
 }
 
+// H returns a C.daos_daos_handle_t
 func (oh *ObjectHandle) H() C.daos_handle_t {
 	return C.daos_handle_t(*oh)
 }
 
+// Pointer returns a *C.daos_daos_handle_t
 func (oh *ObjectHandle) Pointer() *C.daos_handle_t {
 	return (*C.daos_handle_t)(oh)
 }
@@ -816,21 +866,29 @@ func (oh *ObjectHandle) Zero() {
 	oh.Pointer().cookie = 0
 }
 
+// ObjectDeclare declares the object with the specified attributes
 func (coh *ContHandle) ObjectDeclare(oid *ObjectID, e Epoch, oa *ObjectAttribute) error {
 	rc, err := C.daos_obj_declare(coh.H(), oid.Native(), e.Native(), oa.Pointer(), nil)
 	return rc2err("daos_obj_declare", rc, err)
 }
 
+// ObjectOpenFlag specifies the object open flags
 type ObjectOpenFlag uint
 
 const (
-	ObjOpenRO     = ObjectOpenFlag(C.DAOS_OO_RO)
-	ObjOpenRW     = ObjectOpenFlag(C.DAOS_OO_RW)
-	ObjOpenExcl   = ObjectOpenFlag(C.DAOS_OO_EXCL)
+	// ObjOpenRO indicates that the object should be opened Read Only
+	ObjOpenRO = ObjectOpenFlag(C.DAOS_OO_RO)
+	// ObjOpenRW indicates that the object should be opened Read/Write
+	ObjOpenRW = ObjectOpenFlag(C.DAOS_OO_RW)
+	// ObjOpenExcl indicates that the object should be opened for exclusive i/o
+	ObjOpenExcl = ObjectOpenFlag(C.DAOS_OO_EXCL)
+	// ObjOpenIORand indicates that the object will be used for random i/o
 	ObjOpenIORand = ObjectOpenFlag(C.DAOS_OO_IO_RAND)
-	ObjOpenIOSeq  = ObjectOpenFlag(C.DAOS_OO_IO_SEQ)
+	// ObjOpenIOSeq indicates that the object will be used for sequential i/o
+	ObjOpenIOSeq = ObjectOpenFlag(C.DAOS_OO_IO_SEQ)
 )
 
+// ObjectOpen opens the specified object with the supplied flags
 func (coh *ContHandle) ObjectOpen(oid *ObjectID, e Epoch, mode ObjectOpenFlag) (*ObjectHandle, error) {
 	var oh ObjectHandle
 	rc, err := C.daos_obj_open(coh.H(), oid.Native(), e.Native(), C.uint(mode), oh.Pointer(), nil)
@@ -840,6 +898,7 @@ func (coh *ContHandle) ObjectOpen(oid *ObjectID, e Epoch, mode ObjectOpenFlag) (
 	return &oh, nil
 }
 
+// Close closes the object
 func (oh *ObjectHandle) Close() error {
 	if HandleIsInvalid(oh) {
 		return nil
@@ -850,11 +909,13 @@ func (oh *ObjectHandle) Close() error {
 	return rc2err("daos_obj_close", rc, err)
 }
 
+// Punch performs a punch operation on the object
 func (oh *ObjectHandle) Punch(e Epoch) error {
 	rc, err := C.daos_obj_punch(oh.H(), e.Native(), nil)
 	return rc2err("daos_obj_punch", rc, err)
 }
 
+// Query queries the object's attributes
 func (oh *ObjectHandle) Query(e Epoch) (*ObjectAttribute, error) {
 	var oa ObjectAttribute
 	rc, err := C.daos_obj_query(oh.H(), e.Native(), oa.Pointer(), nil, nil)
@@ -865,66 +926,12 @@ func (oh *ObjectHandle) Query(e Epoch) (*ObjectAttribute, error) {
 }
 
 type (
-	// ObjectAttribute is an attribute
+	// ObjectAttribute is an object attribute
 	ObjectAttribute C.daos_obj_attr_t
 
 	// ObjectHandle refers to an open object
 	ObjectHandle C.daos_handle_t
 )
-
-// ByteToAttrKey creates a C buffer with copy of string and returns a go IoVec.
-// Allocates memory in C, return value must be released with Free()
-func ByteToAttrKey(buf []byte) *AttrKey {
-	var iov IoVec
-	return (*AttrKey)(copyToIov(&iov, buf))
-}
-
-// ByteToDistKey creates a C buffer with copy of string and returns a go IoVec.
-// Allocates memory in C, return value must be released with Free()
-func ByteToDistKey(buf []byte) *DistKey {
-	var iov IoVec
-	return (*DistKey)(copyToIov(&iov, buf))
-}
-
-func copyToIov(iov *IoVec, value []byte) *IoVec {
-	n := C.size_t(len(value))
-	iov.iov_len = C.daos_size_t(n)
-	iov.iov_buf_len = C.daos_size_t(n)
-	iov.iov_buf = C.CBytes(value)
-	return iov
-}
-
-func (k *IoVec) Free() {
-	if k != nil && k.iov_buf != nil {
-		C.free(k.iov_buf)
-		k.iov_buf = nil
-	}
-}
-
-func (iov *IoVec) Pointer() *C.daos_iov_t {
-	return (*C.daos_iov_t)(iov)
-
-}
-
-func (dk *DistKey) Free() {
-	(*IoVec)(dk).Free()
-}
-
-func (dk *DistKey) Pointer() *C.daos_key_t {
-	return (*C.daos_key_t)(dk)
-}
-
-func (ak *AttrKey) Free() {
-	(*IoVec)(ak).Free()
-}
-
-func (ak *AttrKey) Pointer() *C.daos_key_t {
-	return (*C.daos_key_t)(ak)
-}
-
-func (ak *AttrKey) Native() C.daos_key_t {
-	return C.daos_key_t(*ak)
-}
 
 // Put sets the first record of a-key to value, with record size is len(value).
 func (oh *ObjectHandle) Put(e Epoch, dkey string, akey string, value []byte) error {
@@ -933,29 +940,24 @@ func (oh *ObjectHandle) Put(e Epoch, dkey string, akey string, value []byte) err
 
 // Putb sets the first record of a-key to value, with record size is len(value).
 func (oh *ObjectHandle) Putb(e Epoch, dkey []byte, akey []byte, value []byte) error {
-	kr := NewKeyRequest(akey)
-	kr.Put(0, 1, uint64(len(value)), value)
+	ir := NewIoRequest(dkey, NewSingleRecordRequest(akey, value))
+	defer ir.Free()
 
-	return oh.Update(e, dkey, KeyRequests{kr})
+	return oh.Update(e, ir)
 }
 
+// PutKeys stores a map of akey->val on the specified dkey
 func (oh *ObjectHandle) PutKeys(e Epoch, dkey string, akeys map[string][]byte) error {
-	var reqs KeyRequests
+	debug.Printf("PutKeys(%s/%v)", dkey, akeys)
+	ir := NewIoRequest([]byte(dkey))
+	defer ir.Free()
 
 	for k := range akeys {
-		kr := NewKeyRequest([]byte(k))
-		kr.Put(0, 1, uint64(len(akeys[k])), akeys[k])
-		reqs = append(reqs, kr)
-
+		ir.AddRecordRequest(NewSingleRecordRequest([]byte(k), akeys[k]))
 	}
 
-	return oh.Update(e, []byte(dkey), reqs)
+	return oh.Update(e, ir)
 }
-
-const (
-	RecAny   = C.DAOS_REC_ANY
-	EpochMax = Epoch(0xffffffffffffffff)
-)
 
 // Get returns first record for a-key.
 func (oh *ObjectHandle) Get(e Epoch, dkey string, akey string) ([]byte, error) {
@@ -964,63 +966,42 @@ func (oh *ObjectHandle) Get(e Epoch, dkey string, akey string) ([]byte, error) {
 
 // Getb returns first record for a-key.
 func (oh *ObjectHandle) Getb(e Epoch, dkey []byte, akey []byte) ([]byte, error) {
-	kr := NewKeyRequest(akey)
-	kr.Get(0, 1, RecAny)
+	ir := NewIoRequest(dkey, NewSingleRecordRequest(akey))
+	defer ir.Free()
 
-	err := oh.Fetch(e, dkey, KeyRequests{kr})
-	if err != nil {
+	debug.Printf("Get(%s/%s): %#v", dkey, akey, ir)
+	if err := oh.Fetch(e, ir); err != nil {
 		return nil, err
 	}
 
-	if len(kr.Buffers) > 0 {
-		return kr.Buffers[0], nil
+	if ir.Records[0].Size() == 0 {
+		return nil, errors.Errorf("Got 0-length record for %s/%s", dkey, akey)
 	}
 
-	return nil, nil
+	return ir.Records[0].Buffers()[0], nil
 }
 
 // GetKeys returns first record for each a-key available in the specified epoch.
 func (oh *ObjectHandle) GetKeys(e Epoch, dkey string, akeys []string) (map[string][]byte, error) {
+	ir := NewIoRequest([]byte(dkey))
+	defer ir.Free()
+
+	debug.Printf("GetKeys(%s/%v)", dkey, akeys)
+
+	for _, k := range akeys {
+		ir.AddRecordRequest(NewSingleRecordRequest([]byte(k)))
+	}
+
+	if err := oh.Fetch(e, ir); err != nil {
+		return nil, err
+	}
+
 	kv := make(map[string][]byte)
-	var reqs KeyRequests
-
-	for k := range akeys {
-		kr := NewKeyRequest([]byte(akeys[k]))
-		kr.Get(0, 1, RecAny)
-		reqs = append(reqs, kr)
-
-	}
-
-	err := oh.Inspect(e, []byte(dkey), reqs)
-	if err != nil {
-		return nil, err
-	}
-
-	var fetch KeyRequests
-
-	// Only fetch akeys that have a size
-	for _, req := range reqs {
-		for _, extent := range req.Extents {
-			if extent.RecSize != RecAny {
-				fetch = append(fetch, req)
-			}
+	for _, rr := range ir.Records {
+		if rr.Size() == 0 {
+			continue
 		}
-	}
-
-	// If no a-keys are available, return empty result.
-	if len(fetch) == 0 {
-		return kv, nil
-	}
-
-	err = oh.Fetch(e, []byte(dkey), fetch)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, kr := range reqs {
-		if len(kr.Buffers) > 0 {
-			kv[string(kr.Attr)] = kr.Buffers[0]
-		}
+		kv[rr.StringKey()] = rr.Buffers()[0]
 	}
 
 	return kv, nil
