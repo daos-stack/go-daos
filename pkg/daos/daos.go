@@ -16,7 +16,6 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/intel-hpdd/logging/debug"
 	"github.com/pborman/uuid"
 	"github.com/pkg/errors"
 )
@@ -948,7 +947,6 @@ func (oh *ObjectHandle) Putb(e Epoch, dkey []byte, akey []byte, value []byte) er
 
 // PutKeys stores a map of akey->val on the specified dkey
 func (oh *ObjectHandle) PutKeys(e Epoch, dkey string, akeys map[string][]byte) error {
-	debug.Printf("PutKeys(%s/%v)", dkey, akeys)
 	ir := NewIoRequest([]byte(dkey))
 	defer ir.Free()
 
@@ -969,7 +967,6 @@ func (oh *ObjectHandle) Getb(e Epoch, dkey []byte, akey []byte) ([]byte, error) 
 	ir := NewIoRequest(dkey, NewSingleRecordRequest(akey))
 	defer ir.Free()
 
-	debug.Printf("Get(%s/%s): %#v", dkey, akey, ir)
 	if err := oh.Fetch(e, ir); err != nil {
 		return nil, err
 	}
@@ -985,8 +982,6 @@ func (oh *ObjectHandle) Getb(e Epoch, dkey []byte, akey []byte) ([]byte, error) 
 func (oh *ObjectHandle) GetKeys(e Epoch, dkey string, akeys []string) (map[string][]byte, error) {
 	ir := NewIoRequest([]byte(dkey))
 	defer ir.Free()
-
-	debug.Printf("GetKeys(%s/%v)", dkey, akeys)
 
 	for _, k := range akeys {
 		ir.AddRecordRequest(NewSingleRecordRequest([]byte(k)))

@@ -283,7 +283,6 @@ func (srr *SingleRecordRequest) PrepareSGL(sgl *C.daos_sg_list_t) {
 	srr.iovBuf = iov.iov_buf
 	iov.iov_len = C.daos_size_t(len(srr.Buffer))
 	iov.iov_buf_len = C.daos_size_t(cap(srr.Buffer))
-	debug.Printf("PrepareSGL(): %p, %d, %d", iov.iov_buf, iov.iov_len, iov.iov_buf_len)
 
 	sgl.sg_nr = C.daos_nr_t{
 		num: 1,
@@ -301,8 +300,6 @@ func (srr *SingleRecordRequest) Complete() error {
 
 	// post-inspect
 	if srr.iod != nil && srr.sgl == nil {
-		name := (*IoVector)(&srr.iod.iod_name).String()
-		debug.Printf("post-inspect (%p (%s)): %d", srr.iod, name, srr.iod.iod_size)
 		srr.SetSize(uint64(srr.iod.iod_size))
 		return nil
 	}
@@ -340,8 +337,6 @@ func NewIoRequest(key []byte, records ...RecordRequest) *IoRequest {
 // AddRecordRequest adds a RecordRequest to the list
 func (ir *IoRequest) AddRecordRequest(rr RecordRequest) {
 	ir.Records = append(ir.Records, rr)
-	debug.Printf("added %s", rr.StringKey())
-	debug.Printf("After AddRecordRequest: %d", len(ir.Records))
 }
 
 // StringKey returns the request's distribution key as a string
@@ -395,7 +390,6 @@ func (ir *IoRequest) IODs() *C.daos_iod_t {
 	iods := make([]C.daos_iod_t, ir.Length())
 	for i, rr := range ir.Records {
 		rr.PrepareIOD(&iods[i])
-		debug.Printf("iods[%d] (%p): %s", i, &iods[i], (*IoVector)(&iods[i].iod_name).String())
 	}
 
 	return (*C.daos_iod_t)(&iods[0])
@@ -410,7 +404,6 @@ func (ir *IoRequest) SGLs() *C.daos_sg_list_t {
 	sgls := make([]C.daos_sg_list_t, ir.Length())
 	for i, rr := range ir.Records {
 		rr.PrepareSGL(&sgls[i])
-		debug.Printf("sgls[%d] (%p)", i, &sgls[i])
 	}
 
 	return (*C.daos_sg_list_t)(&sgls[0])
@@ -419,7 +412,6 @@ func (ir *IoRequest) SGLs() *C.daos_sg_list_t {
 // Complete performs any necessary data copying between C/Go memory
 // and other housekeeping after a Fetch or Inspect
 func (ir *IoRequest) Complete() error {
-	debug.Printf("yeah hi i'm in Complete() with %d records", ir.Length())
 	nonZero := ir.Records[:0]
 	for _, rr := range ir.Records {
 		if err := rr.Complete(); err != nil {
@@ -444,10 +436,8 @@ func (oh *ObjectHandle) Update(e Epoch, ir *IoRequest) error {
 // Inspect attempts to fetch the record size for each akey provided in the
 // KeyRequest Buffers.  No data will be fetched, but the updated
 func (oh *ObjectHandle) Inspect(e Epoch, ir *IoRequest) error {
-	debug.Printf("Inspect(%#v)", ir)
 	rc, err := C.daos_obj_fetch(oh.H(), e.Native(), ir.DKey(), C.uint(ir.Length()), ir.IODs(), nil, nil, nil)
 	if err := rc2err("daos_obj_fetch", rc, err); err != nil {
-		debug.Printf("err: %s", err)
 		return err
 	}
 
@@ -460,7 +450,6 @@ func (oh *ObjectHandle) Inspect(e Epoch, ir *IoRequest) error {
 // a second fetch will done iff all the extents have a valid record size after
 // first fetch.
 func (oh *ObjectHandle) Fetch(e Epoch, ir *IoRequest) error {
-	debug.Printf("Fetch(%#v)", ir)
 	if ir.NeedsPrefetch() {
 		if err := oh.Inspect(e, ir); err != nil {
 			return err

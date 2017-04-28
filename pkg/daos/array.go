@@ -43,6 +43,11 @@ func (ar *ArrayRequest) AddRange(br *BufferedRange) {
 	if cap(br.Buffer) == 0 {
 		br.Buffer = make([]byte, br.Length)
 	}
+	// Adjust the length of the byte slice to match the length of the
+	// request... This is necessary to make the DAOS Array code happy.
+	if len(br.Buffer) == 0 {
+		br.Buffer = br.Buffer[:br.Length]
+	}
 	ar.Ranges = append(ar.Ranges, br)
 }
 
