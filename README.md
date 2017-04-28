@@ -1,18 +1,22 @@
+[![GoDoc](https://godoc.org/github.com/daos-stack/go-daos/pkg/daos?status.svg)](https://godoc.org/github.com/daos-stack/go-daos/pkg/daos)
+
 # Go language bindings for the DAOS API
 
-Work in progress.
-
-This is an Go interface for
+This is a Go interface for
 [DAOS](https://github.com/daos-stack/daos) which is also a work in progress. Building this requires a
-local DAOS build and DAOS server running, so start there first.
+local DAOS build and DAOS server running, so start there first. 
 
-Only basic Pool commands have been implemented so far. 
+## Current Status
+  * Covers most of the DAOS API, even the unimplemented bits (e.g. punch, etc.)
+  * [daosfs](https://github.com/daos-stack/go-daos/tree/master/pkg/daosfs) implements basic POSIX filesystem semantics
+  * The [daos-fuse](https://github.com/daos-stack/go-daos/tree/master/cmd/daos-fuse) utility exposes a daosfs container via FUSE mount
+  * [libdaosfs](https://github.com/daos-stack/go-daos/tree/master/pkg/daosfs/libdaosfs) exports a C-compatible API for use by things like [nfs-ganesha](https://github.com/mjmac/nfs-ganesha/tree/daosfs/src/FSAL/FSAL_DAOSFS)
 
 ## How to Build
 
 This is a [Go](https://golang.orghttps://golang.org/doc/install)
 project, so a Go development tools are naturally required. We
-recommend the most current Go release availble, curently 1.7.4.
+recommend the most current Go release available. As of April 2017, the project has been built and tested with Go 1.8.
 
 Setup environment and build. This assumes $daospath is set as it 
 was in the DAOS [README](https://github.com/daos-stack/daos/blob/master/README.md)
@@ -41,7 +45,7 @@ directly. When dcmd calls orterun itself, the default uri file is
 /tmp/daos-uri or it can be customized with --uri option. See command
 help for more options and command details.
 
-Example comamnds to create an container and manipulate objects:
+Example comands to create an container and manipulate objects:
 
 
 	cont=$(uuidgen)
