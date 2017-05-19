@@ -8,6 +8,9 @@ Given a mountpoint, a DAOS pool UUID, and a container name, this utility will cr
 * A running daos_server instance
 * A DAOS pool uuid (e.g. as returned by `dcmd pool create`)
 
+## Install
+`go get github.com/daos-stack/go-daos/cmd/daos-fuse`
+
 ## Example usage
     $ daos-fuse $HOME/daos-fuse 23605ee8-3172-4f0f-9305-38001a9332fd test &
     $ ls -l $HOME/daos-fuse
